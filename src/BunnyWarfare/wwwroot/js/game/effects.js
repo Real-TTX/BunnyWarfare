@@ -352,6 +352,9 @@ const GROUND = {
     Snow: [0xffffff, 0xe6eef5, 0xb9c6d2, 0x8e99a6],
     Desert: [0xe8c27a, 0xd4a75f, 0xc9964f, 0xb07a3c],
     Moon: [0xc2c2c8, 0x9a9aa2, 0x7d7e86, 0x5a5a62],
+    Autumn: [0xb8a43e, 0x6a4628, 0xe8742a, 0x8a5a30],
+    Volcano: [0x3a3236, 0x1e1a1e, 0xff6a1a, 0x4a4044],
+    Jungle: [0x3f8a2c, 0x6a4a2a, 0x4a301c, 0x5aa83a],
 };
 
 const ringGeometry = new THREE.PlaneGeometry(1, 1);
@@ -472,7 +475,8 @@ export class Effects {
     splash(at) {
         const level = at.y;
         // a column of water that shoots up and falls back
-        const column = new THREE.Mesh(columnGeometry, new THREE.MeshStandardMaterial({ color: 0xe6f6ff, transparent: true, opacity: 0.85, roughness: 0.2, depthWrite: false }));
+        const lava = this.theme === 'Volcano';
+        const column = new THREE.Mesh(columnGeometry, new THREE.MeshStandardMaterial({ color: lava ? 0xff7a1a : 0xe6f6ff, emissive: lava ? 0xff4a00 : 0x000000, transparent: true, opacity: 0.85, roughness: 0.2, depthWrite: false }));
         column.position.set(at.x, level, at.z);
         this.add(column, 1.0, k => {
             const h = Math.sin(Math.min(1, k * 1.4) * Math.PI) * 2.4;
@@ -493,8 +497,8 @@ export class Effects {
                 ripple.material.opacity = Math.max(0, 0.9 * (1 - q));
             });
         }
-        this.particles.emit(at, { count: 50, speed: 2.8, up: 6.5, colors: [0xffffff, 0xd6eefc, 0x9fd3f5], life: 1.2, gravity: 1, size: 0.16, drag: 0.4 });
-        this.particles.emit(at, { count: 24, speed: 2.4, up: 0.2, colors: [0xffffff, 0xeaf6ff], life: 1.2, gravity: 0, size: 0.4, grow: 2, ring: true, drag: 2.5 });
+        this.particles.emit(at, { count: 50, speed: 2.8, up: 6.5, colors: lava ? [0xffd06a, 0xff7a1a, 0xff3a0a] : [0xffffff, 0xd6eefc, 0x9fd3f5], life: 1.2, gravity: 1, size: 0.16, drag: 0.4, additive: lava });
+        this.particles.emit(at, { count: 24, speed: 2.4, up: 0.2, colors: lava ? [0x4a4044, 0x2a2226] : [0xffffff, 0xeaf6ff], life: 1.2, gravity: 0, size: 0.4, grow: 2, ring: true, drag: 2.5 });
     }
 
     /** A muzzle flash (a quick glowing star) at a point. */

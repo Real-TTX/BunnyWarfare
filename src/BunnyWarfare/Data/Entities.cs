@@ -63,6 +63,18 @@ public sealed class Player : SoftDeleteEntity
     public int Kills { get; set; }
 
     public int DamageDealt { get; set; }
+
+    /// <summary>Experience from finished matches (Business.Cosmetics.XpForMatch); the level follows from it.</summary>
+    public int Xp { get; set; }
+
+    /// <summary>The look of the player's bunnies: keys of Business.Cosmetics (fur, outfit, face) and the frame of the portrait.</summary>
+    public string Fur { get; set; } = "snow";
+
+    public string Outfit { get; set; } = "helmet";
+
+    public string Face { get; set; } = "none";
+
+    public string Frame { get; set; } = "wood";
 }
 
 public enum WorldTheme : short
@@ -71,6 +83,9 @@ public enum WorldTheme : short
     Snow = 1,
     Desert = 2,
     Moon = 3,
+    Autumn = 4,
+    Volcano = 5,
+    Jungle = 6,
 }
 
 /// <summary>A small island the bunnies fight on: generated from a seed and a few parameters.</summary>
@@ -234,6 +249,18 @@ public sealed class MatchTeam : Entity
 
     /// <summary>1 = winner; 0 while the match runs.</summary>
     public int Placement { get; set; }
+
+    /// <summary>The look the team had in this match (so old results show the right portraits, also of bots).</summary>
+    public string Fur { get; set; } = "snow";
+
+    public string Outfit { get; set; } = "helmet";
+
+    public string Face { get; set; } = "none";
+
+    public string Frame { get; set; } = "wood";
+
+    /// <summary>The experience the player got for this match (0 for bots and aborted matches).</summary>
+    public int XpGained { get; set; }
 }
 
 /// <summary>A setting of the server (key and value).</summary>

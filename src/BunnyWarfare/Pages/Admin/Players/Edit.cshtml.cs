@@ -31,6 +31,30 @@ public sealed class EditModel(AppDbContext db) : AppPageModel(db)
     [BindProperty]
     public string? Password { get; set; }
 
+    [BindProperty]
+    public int Xp { get; set; }
+
+    [BindProperty]
+    public string Fur { get; set; } = Look.Default.Fur;
+
+    [BindProperty]
+    public string Outfit { get; set; } = Look.Default.Outfit;
+
+    [BindProperty]
+    public string Face { get; set; } = Look.Default.Face;
+
+    [BindProperty]
+    public string Frame { get; set; } = Look.Default.Frame;
+
+    public int Level => Cosmetics.LevelOf(Xp);
+
+    /// <summary>The items of a kind for a select; locked ones say what the player still needs (the administrator may give them anyway).</summary>
+    public IReadOnlyList<Choice> ChoicesOf(IReadOnlyList<Cosmetic> items)
+    {
+        var progress = Stats is { } s ? Progress.Of(s) : new Progress(0, 0, 0, 0, 0);
+        return items.Select(c => new Choice(c.Key, c.Name + (c.Wild ? " 🔥" : string.Empty), c.IsUnlocked(progress) ? null : "gesperrt: " + c.Requirement)).ToList();
+    }
+
     public Player? Stats { get; private set; }
 
     public bool IsNew => Id == 0;
@@ -38,10 +62,9 @@ public sealed class EditModel(AppDbContext db) : AppPageModel(db)
     public bool IsSelf => Id == Me.PlayerId;
 
     /// <summary>The tab shown first: the one with an error, else General.</summary>
-    public string Tab => ModelState.ContainsKey(nameof(Password)) && ModelState[nameof(Password)]!.Errors.Count > 0
-                         || ModelState.ContainsKey(nameof(Role)) && ModelState[nameof(Role)]!.Errors.Count > 0
-        ? "security"
-        : "general";
+    public string Tab => HasError(nameof(Password)) || HasError(nameof(Role)) ? "security" : HasError(nameof(Xp)) || HasError(nameof(Fur)) ? "progress" : "general";
+
+    private bool HasError(string key) => ModelState.TryGetValue(key, out var entry) && entry.Errors.Count > 0;
 
     public IReadOnlyList<Choice> Colors { get; } = PlayerLogic.TeamColors.Select(c => new Choice(c.Value, c.Label, null, c.Value)).ToList();
 
@@ -74,13 +97,19 @@ public sealed class EditModel(AppDbContext db) : AppPageModel(db)
         TeamColor = Stats.TeamColor;
         Role = Stats.Role;
         IsActive = Stats.IsActive;
+        Xp = Stats.Xp;
+        Fur = Stats.Fur;
+        Outfit = Stats.Outfit;
+        Face = Stats.Face;
+        Frame = Stats.Frame;
         return Page();
     }
 
     public async Task<IActionResult> OnPostAsync()
         => await TryAsync(async () =>
         {
-            var id = await PlayerLogic.SaveAsync(Db, Me, new PlayerInput(Id, LoginName, DisplayName, Role, IsActive, TeamName, TeamColor, Password));
+            var id = await PlayerLogic.SaveAsync(Db, Me, new PlayerInput(Id, LoginName, DisplayName, Role, IsActive, TeamName, TeamColor, Password,
+                IsNew ? null : Xp, IsNew ? null : new Look(Fur, Outfit, Face, Frame)));
             Flash(IsNew ? "Der Spieler wurde angelegt." : "Gespeichert.");
             return RedirectToPage(new { id });
         }, LoadStatsAsync);

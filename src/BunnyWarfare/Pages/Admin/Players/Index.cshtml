@@ -16,7 +16,7 @@
     {
         <md-table caption="Spieler">
             <thead>
-                <tr><th scope="col">Spieler</th><th scope="col" class="mat-hide-sm">Team</th><th scope="col">Rolle</th><th scope="col">Status</th><th scope="col" class="mat-num">Spiele</th><th scope="col" class="mat-num mat-hide-sm">Siege</th><th scope="col" class="mat-hide-sm">Letzte Anmeldung</th><th scope="col"><span class="mat-sr-only">Aktionen</span></th></tr>
+                <tr><th scope="col">Spieler</th><th scope="col" class="mat-hide-sm">Team</th><th scope="col">Rolle</th><th scope="col">Status</th><th scope="col" class="mat-num">Level</th><th scope="col" class="mat-num">Spiele</th><th scope="col" class="mat-num mat-hide-sm">Siege</th><th scope="col" class="mat-hide-sm">Letzte Anmeldung</th><th scope="col"><span class="mat-sr-only">Aktionen</span></th></tr>
             </thead>
             <tbody>
                 @foreach (var p in Model.Items)
@@ -26,6 +26,7 @@
                         <td data-label="Team" class="mat-hide-sm">@Ui.Swatch(p.TeamColor) @p.TeamName</td>
                         <td data-label="Rolle"><span class="mat-pill @(p.Role == PlayerRole.Admin ? "mat-pill--accent" : "mat-pill--plain")">@(p.Role == PlayerRole.Admin ? "Administrator" : "Spieler")</span></td>
                         <td data-label="Status">@if (p.IsActive) { <span class="mat-pill mat-pill--ok">Aktiv</span> } else { <span class="mat-pill mat-pill--error">Gesperrt</span> }</td>
+                        <td data-label="Level" class="mat-num mat-mono">@p.Level</td>
                         <td data-label="Spiele" class="mat-num mat-mono">@p.GamesPlayed</td>
                         <td data-label="Siege" class="mat-num mat-mono mat-hide-sm">@p.GamesWon</td>
                         <td data-label="Letzte Anmeldung" class="mat-mono mat-hide-sm">@Ui.Stamp(p.LastLoginDate)</td>

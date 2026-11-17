@@ -45,6 +45,9 @@ export class World {
         this.group.add(this.vegetation.group);
         this.life = new Life(this.data, w.theme, this.uniforms, seed ^ 0x2a2a, stage.scene);
         this.group.add(this.life.group);
+        // smoke from the chimneys and the volcano, spray at the waterfall
+        this.life.smoke(this.vegetation.chimneys);
+        this.life.mist(this.vegetation.fallsBase);
 
         this.particles = new Particles();
         this.group.add(this.particles.points);
@@ -107,7 +110,7 @@ export class World {
         this.uniforms.uTime.value = time;
         this.uniforms.uWind.value.lerp(this.windGoal, 1 - Math.exp(-dt * 0.8));
         for (const b of this.bunnies.values()) b.update(dt, time);
-        this.vegetation.update(dt, this.uniforms.uWind.value);
+        this.vegetation.update(dt, this.uniforms.uWind.value, this.bunnies.values());
         this.marker.update(dt);
         this.particles.update(dt);
         this.effects.update(dt);

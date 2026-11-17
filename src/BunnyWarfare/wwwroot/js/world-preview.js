@@ -12,7 +12,10 @@
     Meadow: { low: [214, 196, 140], mid: [98, 160, 70], high: [60, 110, 50], peak: [120, 112, 100] },
     Snow: { low: [170, 180, 190], mid: [225, 232, 240], high: [245, 248, 252], peak: [255, 255, 255] },
     Desert: { low: [222, 196, 140], mid: [230, 186, 120], high: [196, 140, 80], peak: [160, 110, 70] },
-    Moon: { low: [90, 90, 96], mid: [140, 140, 146], high: [180, 180, 186], peak: [210, 210, 214] }
+    Moon: { low: [90, 90, 96], mid: [140, 140, 146], high: [180, 180, 186], peak: [210, 210, 214] },
+    Autumn: { low: [214, 196, 140], mid: [196, 150, 60], high: [186, 90, 40], peak: [130, 118, 104] },
+    Volcano: { low: [40, 36, 42], mid: [70, 60, 66], high: [50, 44, 52], peak: [130, 60, 40] },
+    Jungle: { low: [214, 200, 150], mid: [70, 150, 50], high: [36, 104, 40], peak: [110, 122, 100] }
   };
 
   function value(name) {
@@ -34,7 +37,7 @@
       var h = heights[i] - data.waterLevel;
       var c;
       if (h < 0) {
-        c = value('Theme') === 'Moon' ? [12, 12, 24] : mix([40, 110, 170], [10, 40, 90], Math.min(1, -h / 3));
+        c = value('Theme') === 'Moon' ? [12, 12, 24] : value('Theme') === 'Volcano' ? mix([255, 120, 30], [150, 40, 10], Math.min(1, -h / 3)) : mix([40, 110, 170], [10, 40, 90], Math.min(1, -h / 3));
       } else {
         land++;
         var t = Math.min(1, h / top);

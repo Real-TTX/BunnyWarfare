@@ -7,7 +7,87 @@ const STYLES = {
     Meadow: { shallow: '#5fd6c8', deep: '#1f6fa6', far: '#2b7cb5', foam: '#ffffff', sky: '#bfe4fb', opacity: 0.86 },
     Snow: { shallow: '#7fb9c9', deep: '#24526f', far: '#33607c', foam: '#f2fbff', sky: '#dfecf6', opacity: 0.9 },
     Desert: { shallow: '#5ef0dc', deep: '#1a8aa5', far: '#2894ae', foam: '#ffffff', sky: '#f6e3bb', opacity: 0.84 },
+    Autumn: { shallow: '#6ac2b4', deep: '#245e7a', far: '#336a86', foam: '#fff6e6', sky: '#f2d8b0', opacity: 0.88 },
+    Jungle: { shallow: '#4fd8a8', deep: '#14685e', far: '#1f7a70', foam: '#f2fff8', sky: '#cfeedd', opacity: 0.86 },
 };
+
+/**
+ * Lava: crust plates drifting on glowing rivers, bright cracks, popping bubbles (unlit, it is its own light). For the sea of the volcano
+ * (mesh at the level of the sea) and the pool in the caldera (pool = true: a little brighter, faster).
+ */
+export function lavaMaterial(uniforms, pool = false) {
+    return new THREE.ShaderMaterial({
+        uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), uTime: uniforms.uTime, uPool: { value: pool ? 1 : 0 } },
+        fog: true,
+        vertexShader: /* glsl */ `
+            #include <common>
+            #include <fog_pars_vertex>
+            uniform float uTime;
+            varying vec3 vW;
+            void main() {
+                vec4 world = modelMatrix * vec4(position, 1.0);
+                world.y += sin(world.x * 0.4 + uTime * 0.6) * 0.04 + sin(world.z * 0.33 - uTime * 0.45) * 0.04;
+                vW = world.xyz;
+                vec4 mvPosition = viewMatrix * world;
+                gl_Position = projectionMatrix * mvPosition;
+                #include <fog_vertex>
+            }`,
+        fragmentShader: /* glsl */ `
+            #include <common>
+            #include <fog_pars_fragment>
+            uniform float uTime;
+            uniform float uPool;
+            varying vec3 vW;
+            ${GLSL_NOISE}
+            void main() {
+                vec2 p = vW.xz;
+                float t = uTime * (1.0 + uPool);
+                vec2 flow = vec2(t * 0.05, t * 0.03);
+                float warp = bwFbm(p * 0.09 + flow * 0.5);
+                // big slow rivers of molten rock between dark crust; the crust breaks into plates of different sizes
+                float river = smoothstep(0.42, 0.62, bwFbm(p * 0.05 + warp * 1.2 - flow * 0.6));
+                vec3 v = bwVoronoi(p * (0.35 + 0.25 * warp) + flow + warp * 2.4);
+                float crack = smoothstep(0.07 + 0.08 * river, 0.0, v.y - v.x);
+                float heat = bwFbm(p * 0.21 - flow * 2.0);
+                vec3 crust = mix(vec3(0.05, 0.022, 0.02), vec3(0.16, 0.05, 0.03), heat) * (0.7 + 0.6 * v.z);
+                vec3 hot = mix(vec3(1.4, 0.36, 0.05), vec3(1.7, 0.95, 0.3), smoothstep(0.45, 0.95, heat));
+                float glow = max(crack * (0.35 + 0.5 * river), river * smoothstep(0.45, 0.85, heat) * 0.85) * (0.82 + 0.18 * sin(t * 2.2 + heat * 11.0));
+                glow = max(glow, uPool * 0.45);
+                vec3 col = mix(crust, hot, glow);
+                vec3 b = bwVoronoi(p * 1.8 + vec2(0.0, t * 0.15));
+                float pop = smoothstep(0.12, 0.04, b.x) * step(0.96, fract(b.z * 13.0 + t * 0.25)) * river;
+                col = mix(col, vec3(1.9, 1.3, 0.55), pop);
+                gl_FragColor = vec4(col, 1.0);
+                #include <tonemapping_fragment>
+                #include <colorspace_fragment>
+                #include <fog_fragment>
+            }`,
+    });
+}
+
+/** The falling water of the jungle's waterfall: streaks rushing down, foam at the foot. */
+export function waterfallMaterial(uniforms) {
+    return new THREE.ShaderMaterial({
+        uniforms: { uTime: uniforms.uTime },
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: /* glsl */ `
+            uniform float uTime;
+            varying vec2 vUv;
+            ${GLSL_NOISE}
+            void main() {
+                float streak = bwNoise(vec2(vUv.x * 9.0, vUv.y * 3.0 + uTime * 2.6)) * 0.6 + bwNoise(vec2(vUv.x * 23.0, vUv.y * 7.0 + uTime * 4.1)) * 0.4;
+                vec3 col = mix(vec3(0.45, 0.78, 0.86), vec3(1.0), smoothstep(0.45, 0.85, streak));
+                float foam = smoothstep(0.18, 0.0, vUv.y);
+                col = mix(col, vec3(1.0), foam);
+                float edge = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
+                gl_FragColor = vec4(col, (0.62 + 0.3 * streak + foam * 0.3) * edge);
+                #include <colorspace_fragment>
+            }`,
+    });
+}
 
 /** A height texture of the map (half floats, linear filtering) for the depth of the water; update() after a crater. */
 class HeightTexture {
@@ -76,6 +156,21 @@ export class Water {
         this.theme = theme;
         this.group = new THREE.Group();
         const W = data.width;
+        if (theme === 'Volcano') {
+            // the sea of the volcano is lava: same level, same rule (falling in ends a bunny), its own glow
+            this.heights = null;
+            const lava = new THREE.Mesh(ringDisc(W / 2, W / 2, reach * 2.3, 128), lavaMaterial(uniforms));
+            lava.position.y = data.waterLevel;
+            lava.name = 'lava';
+            lava.renderOrder = 2;
+            lava.frustumCulled = false;
+            this.mesh = lava;
+            this.group.add(lava);
+            // the glow of the lava lights the island from below
+            const light = new THREE.HemisphereLight(0x3a2a40, 0xff5a1a, 0.55);
+            this.group.add(light);
+            return;
+        }
         if (theme === 'Moon') {
             this.heights = null;
             // the void below the island: a glowing violet mist at the level where bunnies are lost, thicker away from the island

@@ -19,6 +19,14 @@ public sealed class LobbySlot
     public bool IsBot { get; init; }
 
     public BotLevel BotLevel { get; init; }
+
+    public Look Look { get; init; } = Look.Default;
+
+    /// <summary>What the player had earned when they took the seat (null for bots): the result shows the XP and the unlocks of the match from it.</summary>
+    public Progress? Progress { get; init; }
+
+    /// <summary>The level shown in the lobby and the match (bots: by their strength).</summary>
+    public int Level { get; init; }
 }
 
 /// <summary>
@@ -117,6 +125,7 @@ public sealed class MatchRoom
         Slots.Add(new LobbySlot
         {
             TeamIndex = FreeTeamIndex(), PlayerId = player.Id, PlayerName = player.DisplayName, TeamName = player.TeamName, Color = FreeColor(player.TeamColor),
+            Look = Look.Of(player), Progress = Progress.Of(player), Level = Cosmetics.LevelOf(player.Xp),
         });
         outgoing.Add(System($"{player.DisplayName} ist dabei."));
         outgoing.Add(new Outgoing("Room", ToDto()));
@@ -135,6 +144,7 @@ public sealed class MatchRoom
         Slots.Add(new LobbySlot
         {
             TeamIndex = FreeTeamIndex(), PlayerName = "Bot (" + LevelName(level) + ")", TeamName = name, Color = FreeColor(null), IsBot = true, BotLevel = level,
+            Look = Cosmetics.RandomLook(Random.Shared), Level = BotShownLevel(level),
         });
         return [new Outgoing("Room", ToDto())];
     }
@@ -171,7 +181,7 @@ public sealed class MatchRoom
             throw new BusinessException("Es braucht mindestens zwei Teams – lade jemanden ein oder nimm einen Bot dazu.");
         }
 
-        return Slots.OrderBy(s => s.TeamIndex).Select(s => new TeamSlot(s.TeamIndex, s.PlayerId, s.IsBot, s.BotLevel, s.TeamName, s.Color)).ToList();
+        return Slots.OrderBy(s => s.TeamIndex).Select(s => new TeamSlot(s.TeamIndex, s.PlayerId, s.IsBot, s.BotLevel, s.TeamName, s.Color, s.Look)).ToList();
     }
 
     private void RequireHostInLobby(long playerId)
@@ -232,6 +242,14 @@ public sealed class MatchRoom
         return Math.Sqrt((2 + rMean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rMean) / 256) * db * db);
     }
 
+    /// <summary>Bots show a level by their strength (a hard bot looks like a veteran).</summary>
+    private static int BotShownLevel(BotLevel level) => level switch
+    {
+        BotLevel.Easy => 2 + Random.Shared.Next(3),
+        BotLevel.Hard => 18 + Random.Shared.Next(8),
+        _ => 8 + Random.Shared.Next(5),
+    };
+
     private static string LevelName(BotLevel level) => level switch
     {
         BotLevel.Easy => "leicht",
@@ -262,6 +280,7 @@ public sealed class MatchRoom
             var team = new TeamState
             {
                 Index = slot.TeamIndex, Name = slot.TeamName, Color = slot.Color, PlayerId = slot.PlayerId, IsBot = slot.IsBot, BotLevel = slot.BotLevel,
+                Look = slot.Look, Progress = slot.Progress, Level = slot.Level,
             };
             foreach (var w in game.Weapons.Where(w => w.Ammo > 0))
             {
@@ -640,9 +659,23 @@ public sealed class MatchRoom
             .ThenByDescending(t => t.EliminatedAtTurn ?? int.MaxValue)
             .ThenByDescending(t => t.DamageDealt)
             .ToList();
-        var teams = ranked.Select((t, i) => new TeamResultDto(t.Index, t.Name, t.Color, i + 1, t.Kills, t.DamageDealt, t.IsBot)).ToList();
+        var teams = ranked.Select((t, i) => ResultOf(t, i + 1, t.Index == game.WinnerTeam && !aborted, aborted)).ToList();
         var winner = game.Teams.FirstOrDefault(t => t.Index == game.WinnerTeam);
         return new ResultDto(aborted ? null : winner?.Index, aborted ? null : winner?.Name, aborted, teams);
+    }
+
+    /// <summary>The result of a team; a player's team also gets the XP of the match (the same numbers MatchLogic.FinishAsync saves), the new level and what it unlocked.</summary>
+    private static TeamResultDto ResultOf(TeamState t, int placement, bool won, bool aborted)
+    {
+        var look = t.Look;
+        if (t.IsBot || t.Progress is not { } before || aborted)
+        {
+            return new TeamResultDto(t.Index, t.Name, t.Color, placement, t.Kills, t.DamageDealt, t.IsBot, look.Fur, look.Outfit, look.Face, look.Frame, t.Level, 0, t.Level, t.Level, []);
+        }
+
+        var after = before.After(won, placement, t.Kills, t.DamageDealt);
+        return new TeamResultDto(t.Index, t.Name, t.Color, placement, t.Kills, t.DamageDealt, false, look.Fur, look.Outfit, look.Face, look.Frame, before.Level,
+            after.Xp - before.Xp, before.Level, after.Level, Cosmetics.NewlyUnlocked(before, after));
     }
 
     public IReadOnlyList<TeamOutcome> Outcomes()
@@ -664,7 +697,8 @@ public sealed class MatchRoom
     {
         var now = DateTime.UtcNow;
         var slots = Slots.OrderBy(s => s.TeamIndex)
-            .Select(s => new LobbySlotDto(s.TeamIndex, s.PlayerId, s.PlayerName, s.TeamName, s.Color, s.IsBot, s.BotLevel.ToString(), s.IsBot || (s.PlayerId is { } id && IsConnected(id))))
+            .Select(s => new LobbySlotDto(s.TeamIndex, s.PlayerId, s.PlayerName, s.TeamName, s.Color, s.IsBot, s.BotLevel.ToString(), s.IsBot || (s.PlayerId is { } id && IsConnected(id)),
+                s.Look.Fur, s.Look.Outfit, s.Look.Face, s.Look.Frame, s.Level))
             .ToList();
         GameDto? game = null;
         if (Game is { } g)
@@ -697,7 +731,7 @@ public sealed class MatchRoom
     private List<TeamDto> Teams()
         => Game!.Teams.Select(t => new TeamDto(t.Index, t.Name, t.Color, t.PlayerId, t.IsBot,
             t.Ammo.ToDictionary(a => a.Key.ToString(global::System.Globalization.CultureInfo.InvariantCulture), a => a.Value),
-            t.Surrendered || !Game.TeamAlive(t.Index), t.Kills, t.DamageDealt)).ToList();
+            t.Surrendered || !Game.TeamAlive(t.Index), t.Kills, t.DamageDealt, t.Look.Fur, t.Look.Outfit, t.Look.Face, t.Look.Frame, t.Level)).ToList();
 
     private sealed class Releaser(SemaphoreSlim gate) : IDisposable
     {

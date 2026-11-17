@@ -4,6 +4,8 @@ import { $, el, icon, button, segmented, field, toast, themeName, LEVEL_NAMES } 
 import { logo, bunnyAvatar, weaponIcon, speakerIcon } from './icons.js';
 import { api, session, worlds, ApiError } from './api.js';
 import { mapCanvas, mapCanvasByName } from './maps.js';
+import { portrait, updatePortrait, levelBadge, sizeBadge } from './avatars.js';
+import { BunnyPreview, lookOf } from './portrait.js';
 
 const TOKEN_IN_LINK = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
@@ -59,8 +61,15 @@ export class Menu {
         stage.classList.toggle('is-blurred', mode === 'strong');
     }
 
+    /** The 3D bunny of the wardrobe lives only while its panel is open. */
+    disposePreview() {
+        this.preview?.dispose();
+        this.preview = null;
+    }
+
     openPanel(kind, content) {
         clearInterval(this.refreshTimer);
+        if (!content.contains(this.preview?.container)) this.disposePreview();
         const layer = $('layer-panel');
         layer.replaceChildren(content);
         layer.hidden = false;
@@ -73,6 +82,7 @@ export class Menu {
 
     closePanel(toMenu = true) {
         clearInterval(this.refreshTimer);
+        this.disposePreview();
         const layer = $('layer-panel');
         layer.hidden = true;
         layer.replaceChildren();
@@ -162,12 +172,11 @@ export class Menu {
         layer.dataset.player = String(session.player?.id ?? '');
         const p = session.player;
 
-        const avatar = el('span', 'avatar');
-        avatar.style.background = p.teamColor;
-        avatar.append(bunnyAvatar(p.teamColor));
+        const avatar = portrait(p, { size: 46, level: p.level ?? 1 });
+        avatar.dataset.me = '';
         const chip = el('button', 'player-chip', [avatar, el('span', 'name', [document.createTextNode(p.displayName), el('small', null, p.teamName)])]);
         chip.type = 'button';
-        chip.title = 'Profil & Team';
+        chip.title = 'Profil & Kleiderschrank';
         chip.onclick = () => this.showProfile();
         const top = el('div', 'menu-top', [
             chip,
@@ -194,7 +203,8 @@ export class Menu {
             card('plum', icon('trophy'), 'Rangliste', 'Die besten Löffel', () => this.showLeaderboard()),
         ]);
         const small = el('div', 'menu-small', [
-            button('Profil & Team', { className: 'btn small', iconName: 'user', onClick: () => this.showProfile() }),
+            button('Profil', { className: 'btn small', iconName: 'user', onClick: () => this.showProfile() }),
+            button('Kleiderschrank', { className: 'btn small', iconName: 'sparkles', onClick: () => this.showProfile('wardrobe') }),
             button('Anleitung', { className: 'btn small', iconName: 'book', onClick: () => this.showGuide() }),
         ]);
 
@@ -227,6 +237,11 @@ export class Menu {
             const home = await api.get('/api/home');
             this.home = home;
             const layer = $('menu');
+            const me = layer.querySelector('[data-me]');
+            if (me && home.player) {
+                Object.assign(session.player, home.player);
+                updatePortrait(me, session.player, home.player.level);
+            }
             const announce = layer.querySelector('[data-announce]');
             if (announce) {
                 announce.hidden = !home.announcement;
@@ -244,7 +259,7 @@ export class Menu {
                 const list = el('ul', 'history');
                 for (const h of (home.history ?? []).slice(0, 3)) {
                     const result = h.status === 'Aborted' ? 'abgebr.' : h.placement === 1 ? 'Sieg!' : `${h.placement}. Platz`;
-                    list.append(el('li', null, [el('span', null, h.worldName), el('span', h.placement === 1 ? 'win' : null, result)]));
+                    list.append(el('li', null, [el('span', null, h.worldName), h.xpGained > 0 ? el('span', 'xp', `+${h.xpGained} XP`) : null, el('span', h.placement === 1 ? 'win' : null, result)]));
                 }
                 stats.replaceChildren(el('h3', null, [icon('bar-chart'), document.createTextNode('Deine Bilanz')]), grid, list.children.length ? list : el('p', 'hint', 'Noch keine Spiele – auf geht’s!'));
             }
@@ -296,7 +311,10 @@ export class Menu {
         this.openPanel('quick', panel);
         try {
             this.worldList = await worlds();
-            for (const w of this.worldList) addChip(w.id, w.name);
+            for (const w of this.worldList) {
+                addChip(w.id, w.name);
+                chips[chips.length - 1].append(sizeBadge(w.width));
+            }
         } catch (error) {
             showError(error);
         }
@@ -455,7 +473,7 @@ export class Menu {
         };
         for (const w of list) {
             const sub = `${(w.themeName ?? themeName(w.theme)) === w.name ? '' : `${w.themeName ?? themeName(w.theme)} · `}${Math.round(w.width)} m${w.gravity < 6 ? ' · wenig Schwerkraft' : ''}`;
-            const c = el('button', 'wcard', [mapCanvas(w.id), el('b', null, w.name), el('small', null, sub)]);
+            const c = el('button', 'wcard', [mapCanvas(w.id), sizeBadge(w.width), el('b', null, w.name), el('small', null, sub)]);
             c.type = 'button';
             c.dataset.id = String(w.id);
             c.onclick = () => select(w);
@@ -531,7 +549,7 @@ export class Menu {
                 load();
             }, 250);
         });
-        const sorts = [['rank', 'Rang', 'asc'], ['kills', 'K.O.', 'desc'], ['damage', 'Schaden', 'desc'], ['games', 'Spiele', 'desc'], ['name', 'Name', 'asc']];
+        const sorts = [['rank', 'Rang', 'asc'], ['level', 'Level', 'desc'], ['kills', 'K.O.', 'desc'], ['damage', 'Schaden', 'desc'], ['games', 'Spiele', 'desc'], ['name', 'Name', 'asc']];
         const chips = sorts.map(([value, label, dir]) => {
             const c = el('button', `chip${value === 'rank' ? ' is-on' : ''}`, label);
             c.type = 'button';
@@ -568,9 +586,7 @@ export class Menu {
             podium.replaceChildren();
             order.forEach((r, i) => {
                 if (!r) return;
-                const a = el('div', 'avatar');
-                a.style.background = r.teamColor;
-                a.append(bunnyAvatar(r.teamColor, { wink: i === 1 }));
+                const a = portrait(r, { size: i === 1 ? 92 : 74, level: r.level, className: 'podium-portrait' });
                 podium.append(el('div', `place ${classes[i]}`, [
                     el('div', 'who', [a, el('b', null, r.displayName), el('small', null, `${r.gamesWon} Siege · ${r.kills} K.O.`)]),
                     el('div', 'block', String(r.rank)),
@@ -593,7 +609,7 @@ export class Menu {
             sw.style.setProperty('--c', r.teamColor);
             tbody.append(el('tr', r.playerId === me ? 'is-me' : null, [
                 el('td', 'rank', String(r.rank)),
-                el('td', null, r.displayName),
+                el('td', null, el('div', 'playercell', [portrait(r, { size: 34, level: r.level }), el('span', null, r.displayName)])),
                 el('td', 'hide-sm', el('div', 'teamcell', [sw, el('span', null, r.teamName)])),
                 el('td', 'num', String(r.gamesPlayed)),
                 el('td', 'num', String(r.gamesWon)),
@@ -613,7 +629,7 @@ export class Menu {
         }
     }
 
-    // ------------------------------------------------------------ profile & team
+    // ------------------------------------------------------------ profile, wardrobe & team
 
     async showProfile(tab = 'profile') {
         let profile;
@@ -623,7 +639,7 @@ export class Menu {
             showError(error);
             return;
         }
-        const tabs = [['profile', 'Profil', 'user'], ['team', 'Team', 'users'], ['security', 'Sicherheit', 'lock']];
+        const tabs = [['profile', 'Profil', 'user'], ['wardrobe', 'Kleiderschrank', 'sparkles'], ['team', 'Team', 'users'], ['security', 'Sicherheit', 'lock']];
         const tabRow = el('div', 'tabs');
         for (const [value, label, iconName] of tabs) {
             const c = el('button', `chip${value === tab ? ' is-on' : ''}`, [icon(iconName), el('span', null, label)]);
@@ -633,6 +649,7 @@ export class Menu {
         }
         const body = el('div');
         const foot = el('div', 'panel-foot');
+        const inputsByField = {};
         const save = async (work, okText) => {
             try {
                 await work();
@@ -643,25 +660,16 @@ export class Menu {
                 showError(error, inputsByField);
             }
         };
-        const inputsByField = {};
         if (tab === 'profile') {
-            const name = field('Dein Name', { value: profile.displayName, maxLength: 60 });
-            inputsByField.displayName = name;
-            body.append(el('p', 'lead', `Angemeldet als ${profile.loginName}.`), name.row);
-            const b = button('Speichern', { className: 'btn primary', iconName: 'save' });
-            b.onclick = () => busy(b, () => save(() => api.put('/api/profile', { displayName: name.input.value, teamName: profile.teamName, teamColor: profile.teamColor }), 'Gespeichert.'));
-            foot.append(el('span', 'spacer'), b);
+            this.profileOverview(profile, body, foot, save, inputsByField);
+        } else if (tab === 'wardrobe') {
+            this.wardrobe(profile, body, foot);
         } else if (tab === 'team') {
             let color = profile.teamColor;
             const name = field('Teamname', { value: profile.teamName, maxLength: 40 });
             inputsByField.teamName = name;
             const preview = el('div', 'preview-bunny');
-            const draw = () => {
-                const a = el('div', 'avatar');
-                a.style.background = color;
-                a.append(bunnyAvatar(color, { wink: true }));
-                preview.replaceChildren(a);
-            };
+            const draw = () => preview.replaceChildren(portrait({ ...profile, color }, { size: 150, className: 'big' }));
             const colors = el('div', 'colors');
             for (const c of profile.colors ?? []) {
                 const sw = el('button', c.value === color ? 'is-on' : null);
@@ -678,7 +686,7 @@ export class Menu {
             }
             draw();
             body.append(el('div', 'grid2', [
-                el('div', 'stack', [name.row, el('div', null, [el('span', 'label', 'Teamfarbe'), colors]), el('p', 'hint', 'Ist die Farbe in einem Spiel schon vergeben, bekommst du eine freie.')]),
+                el('div', 'stack', [name.row, el('div', null, [el('span', 'label', 'Teamfarbe'), colors]), el('p', 'hint', 'Helm, Schal und Rahmen tragen die Teamfarbe. Ist sie in einem Spiel schon vergeben, bekommst du eine freie.')]),
                 preview,
             ]));
             const b = button('Speichern', { className: 'btn primary', iconName: 'save' });
@@ -698,8 +706,164 @@ export class Menu {
             }, 'Das Passwort wurde geändert.'));
             foot.append(el('span', 'spacer'), b);
         }
-        const panel = el('section', 'panel', [this.head('Profil & Team'), tabRow, body, foot]);
+        const wide = tab === 'profile' || tab === 'wardrobe';
+        const panel = el('section', `panel${wide ? ' wide' : ''}`, [this.head(tab === 'wardrobe' ? 'Kleiderschrank' : 'Profil'), tabRow, body, foot]);
         this.openPanel('profile', panel);
+        if (tab === 'wardrobe') this.preview?.start?.();
+    }
+
+    /** The profile at a glance: portrait, level and XP, numbers, the next rewards, the name. */
+    profileOverview(profile, body, foot, save, inputsByField) {
+        const inLevel = profile.xp - profile.xpAtLevel;
+        const share = profile.maxLevel ? 1 : Math.max(0, Math.min(1, inLevel / Math.max(1, profile.xpForNext)));
+        const fill = el('i');
+        fill.style.width = `${share * 100}%`;
+        const xpbar = el('div', 'xpbar', [fill, el('span', null, profile.maxLevel ? 'Höchstes Level erreicht!' : `${inLevel} / ${profile.xpForNext} XP bis Level ${profile.level + 1}`)]);
+        const items = (profile.wardrobe ?? []).flatMap(k => k.items.map(i => ({ ...i, kind: k.kind, kindName: k.name })));
+        const owned = items.filter(i => i.unlocked).length;
+        const next = items.filter(i => !i.unlocked && i.level > profile.level).sort((a, b) => a.level - b.level).slice(0, 4);
+        const special = items.filter(i => !i.unlocked && i.level === 0).slice(0, 3);
+        const look = { ...profile, color: profile.teamColor };
+        const rewardTile = i => {
+            const tile = el('div', `reward${i.wild ? ' is-wild' : ''}`, [
+                portrait({ ...look, [i.kind]: i.key }, { size: 54 }),
+                el('div', null, [el('b', null, i.name), el('small', null, `${i.kindName} · ${i.requirement}`)]),
+            ]);
+            if (i.wild) tile.append(el('span', 'flame', '🔥'));
+            return tile;
+        };
+        const s = profile.stats ?? {};
+        const tile = (value, label) => el('div', 'stat', [el('b', null, String(value)), el('span', null, label)]);
+        const name = field('Dein Name', { value: profile.displayName, maxLength: 60 });
+        inputsByField.displayName = name;
+        const dress = button('Zum Kleiderschrank', { className: 'btn small', iconName: 'sparkles', onClick: () => this.showProfile('wardrobe') });
+
+        body.append(
+            el('div', 'profile-hero', [
+                el('div', 'hero-portrait', [portrait(look, { size: 150, className: 'big' }), levelBadge(profile.level)]),
+                el('div', 'who', [
+                    el('h3', 'pname', profile.displayName),
+                    el('div', 'muted', `${profile.teamName} · angemeldet als ${profile.loginName}`),
+                    el('div', 'lvl-line', [el('b', null, `Level ${profile.level}`), el('span', 'muted', `${profile.xp} XP gesamt`)]),
+                    xpbar,
+                    el('div', 'row', [el('span', 'muted', `${owned} von ${items.length} Sachen freigeschaltet`), el('span', 'spacer'), dress]),
+                ]),
+            ]),
+            el('div', 'stat-tiles', [tile(s.gamesPlayed ?? 0, 'Spiele'), tile(s.gamesWon ?? 0, 'Siege'), tile(s.kills ?? 0, 'K.O.'), tile(s.damageDealt ?? 0, 'Schaden'), tile(s.rank ? `#${s.rank}` : '–', 'Rang')]),
+            el('div', 'grid2', [
+                el('div', 'stack', [el('h3', 'h3', [icon('star'), document.createTextNode('Nächste Belohnungen')]),
+                    next.length ? el('div', 'rewards', next.map(rewardTile)) : el('p', 'hint', 'Alles, was es mit Leveln gibt, hast du schon!')]),
+                el('div', 'stack', [el('h3', 'h3', [icon('trophy'), document.createTextNode('Nur für Helden')]),
+                    special.length ? el('div', 'rewards', special.map(rewardTile)) : el('p', 'hint', 'Alle Sieg- und K.O.-Belohnungen gehören dir.'),
+                    name.row]),
+            ]));
+        const b = button('Speichern', { className: 'btn primary', iconName: 'save' });
+        b.onclick = () => busy(b, () => save(() => api.put('/api/profile', { displayName: name.input.value, teamName: profile.teamName, teamColor: profile.teamColor }), 'Gespeichert.'));
+        foot.append(el('span', 'sub', 'XP gibt es für jedes fertige Spiel: mehr für Siege, K.O. und Schaden.'), el('span', 'spacer'), b);
+    }
+
+    /** The wardrobe: fur, hat, face and frame; a turning 3D bunny shows the choice, locked things say how to get them. */
+    wardrobe(profile, body, foot) {
+        const color = profile.teamColor;
+        const saved = lookOf(profile);
+        const draft = { fur: saved.fur, outfit: saved.outfit, face: saved.face, frame: saved.frame };
+        const kinds = profile.wardrobe ?? [];
+        let kind = kinds[0]?.kind ?? 'fur';
+
+        const stage = el('div', 'wardrobe-stage');
+        this.disposePreview();
+        try {
+            this.preview = new BunnyPreview(stage);
+            this.preview.setLook({ ...draft, color });
+        } catch {
+            this.preview = null;
+        }
+        const big = portrait({ ...draft, color }, { size: 96 });
+        const caption = el('div', 'wardrobe-caption');
+        const kindRow = el('div', 'tabs small');
+        const grid = el('div', 'wardrobe-grid');
+        const count = el('span', 'muted');
+        const saveButton = button('Anziehen', { className: 'btn primary', iconName: 'save' });
+
+        const dirty = () => ['fur', 'outfit', 'face', 'frame'].some(k => draft[k] !== saved[k]);
+        const nameOf = (k, key) => kinds.find(x => x.kind === k)?.items.find(i => i.key === key)?.name ?? key;
+        const refresh = (cheer = false) => {
+            updatePortrait(big, { ...draft, color });
+            this.preview?.setLook({ ...draft, color });
+            if (cheer) this.preview?.play?.('cheer');
+            caption.replaceChildren(el('b', null, `${nameOf('fur', draft.fur)} · ${nameOf('outfit', draft.outfit)}`),
+                el('small', null, `${nameOf('face', draft.face)} · Rahmen ${nameOf('frame', draft.frame)}`));
+            saveButton.disabled = !dirty();
+        };
+        const render = () => {
+            const group = kinds.find(k => k.kind === kind);
+            grid.replaceChildren();
+            if (!group) return;
+            count.textContent = `${group.items.filter(i => i.unlocked).length} / ${group.items.length} freigeschaltet`;
+            for (const item of group.items) {
+                const on = draft[kind] === item.key;
+                const tile = el('button', `witem${on ? ' is-on' : ''}${item.unlocked ? '' : ' is-locked'}${item.wild ? ' is-wild' : ''}`, [
+                    portrait({ ...draft, [kind]: item.key, color }, { size: 64 }),
+                    el('b', null, item.name),
+                    item.unlocked ? null : el('small', 'req', [icon('lock'), el('span', null, item.requirement)]),
+                ]);
+                if (item.wild) tile.append(el('span', 'flame', '🔥'));
+                tile.type = 'button';
+                tile.title = item.unlocked ? item.name : `${item.name} – gesperrt: ${item.requirement}`;
+                tile.onclick = () => {
+                    if (!item.unlocked) {
+                        this.app.sound.tick?.();
+                        toast(`„${item.name}“ ist noch gesperrt – ${item.requirement}.`, 'info');
+                        return;
+                    }
+                    draft[kind] = item.key;
+                    this.app.sound.tick?.();
+                    render();
+                    refresh(true);
+                };
+                grid.append(tile);
+            }
+        };
+        for (const k of kinds) {
+            const c = el('button', `chip${k.kind === kind ? ' is-on' : ''}`, k.name);
+            c.type = 'button';
+            c.onclick = () => {
+                kind = k.kind;
+                for (const x of kindRow.children) x.classList.toggle('is-on', x === c);
+                render();
+            };
+            kindRow.append(c);
+        }
+        const shuffle = button('Zufall', { className: 'btn small', iconName: 'refresh', title: 'Ein zufälliger Look aus deinen Sachen' });
+        shuffle.onclick = () => {
+            for (const k of kinds) {
+                const free = k.items.filter(i => i.unlocked);
+                if (free.length) draft[k.kind] = free[Math.floor(Math.random() * free.length)].key;
+            }
+            render();
+            refresh(true);
+        };
+        saveButton.onclick = () => busy(saveButton, async () => {
+            try {
+                await api.put('/api/profile/look', { ...draft });
+                Object.assign(saved, draft);
+                await api.refreshSession();
+                $('menu').dataset.built = '';
+                this.preview?.play?.('dance');
+                toast('Schick! So ziehen deine Hasen in die Schlacht.', 'success');
+                refresh();
+            } catch (error) {
+                showError(error);
+            }
+        });
+
+        body.append(el('div', 'wardrobe', [
+            el('div', 'wardrobe-left', [stage, el('div', 'row wardrobe-me', [big, caption])]),
+            el('div', 'wardrobe-right', [el('div', 'row', [kindRow, el('span', 'spacer'), count]), grid]),
+        ]));
+        foot.append(el('span', 'sub', 'Neue Sachen gibt es mit jedem Level – und für Siege und K.O. 🔥 = besonders wild.'), el('span', 'spacer'), shuffle, saveButton);
+        render();
+        refresh();
     }
 
     // ------------------------------------------------------------ guide & about

@@ -68,13 +68,175 @@ export class Life {
             this.ducks();
             this.motes(260, 0xfff2b0, 0.05, 0.75, 2.5);
         }
-        if (theme === 'Meadow' || theme === 'Desert') this.gulls(material);
-        if (theme !== 'Moon') this.fish(material);
+        if (theme === 'Meadow' || theme === 'Desert' || theme === 'Autumn') this.gulls(material);
+        if (theme !== 'Moon' && theme !== 'Volcano') this.fish(material);
+        if (theme === 'Autumn') { this.leafFall(); this.butterflies(material); this.motes(160, 0xffd27a, 0.05, 0.7, 2.5); }
+        if (theme === 'Volcano') { this.embers(); this.ash(); }
+        if (theme === 'Jungle') { this.parrots(material); this.butterflies(material); this.dragonflies(material); this.motes(220, 0xd8ff7a, 0.06, 0.85, 2.2, true); }
         if (theme === 'Snow') { this.snowfall(); this.ducks(true); }
         if (theme === 'Desert') { this.dust(); this.tumbleweeds(); }
         if (theme === 'Moon') { this.shootingStars(); this.motes(200, 0x9f8cff, 0.07, 0.8, 3, true); }
     }
 
+    // ---------------------------------------------------------------- autumn leaves, embers and ash, parrots, smoke
+
+    /** Leaves tumbling down in reds, oranges and yellows (one point cloud with vertex colours). */
+    leafFall() {
+        const W = this.data.width;
+        const count = Math.round(Math.min(900, W * W * 0.35));
+        const positions = new Float32Array(count * 3), colors = new Float32Array(count * 3);
+        const palette = ['#e8742a', '#c8321e', '#f2c43a', '#d65a1e', '#a8582a'].map(h => new THREE.Color(h));
+        for (let i = 0; i < count; i++) {
+            positions[i * 3] = -W * 0.1 + this.random() * W * 1.2;
+            positions[i * 3 + 1] = this.data.waterLevel + this.random() * 12;
+            positions[i * 3 + 2] = -W * 0.1 + this.random() * W * 1.2;
+            const c = palette[i % palette.length];
+            colors.set([c.r, c.g, c.b], i * 3);
+        }
+        this.leaves = this.pointCloud(positions, colors, 0.13, 0.95, false);
+    }
+
+    /** Embers rising from the lava (around the island and from the caldera). */
+    embers() {
+        const W = this.data.width;
+        const count = 420;
+        const positions = new Float32Array(count * 3), colors = new Float32Array(count * 3);
+        const hot = [new THREE.Color('#ffb04a'), new THREE.Color('#ff6a1a'), new THREE.Color('#ffe08a')];
+        for (let i = 0; i < count; i++) {
+            positions[i * 3] = -W * 0.25 + this.random() * W * 1.5;
+            positions[i * 3 + 1] = this.data.waterLevel + this.random() * 10;
+            positions[i * 3 + 2] = -W * 0.25 + this.random() * W * 1.5;
+            const c = hot[i % 3];
+            colors.set([c.r, c.g, c.b], i * 3);
+        }
+        this.emberCloud = this.pointCloud(positions, colors, 0.09, 1, true);
+    }
+
+    ash() {
+        this.ashCloud = this.volume(Math.round(Math.min(2200, this.data.width * this.data.width * 0.6)), 0x8a8086, 0.08, 0.7);
+    }
+
+    pointCloud(positions, colors, size, opacity, additive) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const texture = this.dotTexture();
+        const points = new THREE.Points(geometry, new THREE.PointsMaterial({ size, map: texture, vertexColors: true, transparent: true, opacity, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending }));
+        points.frustumCulled = false;
+        this.disposables.push(points.material, texture, geometry);
+        this.group.add(points);
+        return points;
+    }
+
+    dotTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        g.addColorStop(0, 'rgba(255,255,255,1)');
+        g.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 32, 32);
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    /** Colourful parrots in small flocks, low over the jungle. */
+    parrots(material) {
+        const count = 7;
+        const wing = wingGeometry(0.3, 0.2, '#ffffff', '#2a5ad6');
+        const body = paint(new THREE.CapsuleGeometry(0.06, 0.26, 2, 6).rotateX(Math.PI / 2), '#ffffff');
+        this.parrotFlock = new Flock(count, wing, body, material);
+        const colours = ['#e8302a', '#2fa83a', '#ffd23a', '#2a8ae8'];
+        const c = new THREE.Color();
+        this.parrotState = [];
+        for (let i = 0; i < count; i++) {
+            c.set(colours[i % colours.length]);
+            this.parrotFlock.wings.setColorAt(i * 2, c);
+            this.parrotFlock.wings.setColorAt(i * 2 + 1, c);
+            this.parrotFlock.body.setColorAt(i, c);
+            this.parrotState.push({
+                phase: this.random() * Math.PI * 2, radius: this.data.width * (0.15 + this.random() * 0.25),
+                height: this.data.waterLevel + 5 + this.random() * 3, speed: (0.25 + this.random() * 0.15) * (i % 2 ? 1 : -1),
+                cx: this.center.x + (this.random() - 0.5) * this.data.width * 0.3, cz: this.center.z + (this.random() - 0.5) * this.data.width * 0.3,
+            });
+        }
+        this.group.add(this.parrotFlock.wings, this.parrotFlock.body);
+    }
+
+    /**
+     * Smoke from chimneys and the volcano: [{ x, y, z, size, item }] (item.gone = the house was blown up, the smoke stops).
+     * Soft round puffs that rise, grow, drift with the wind and fade.
+     */
+    smoke(sources) {
+        if (!sources?.length) return;
+        const per = 26;
+        const count = sources.length * per;
+        this.smokeSources = sources;
+        this.smokePer = per;
+        const positions = new Float32Array(count * 3);
+        this.smokeAge = new Float32Array(count);
+        const size = new Float32Array(count), alpha = new Float32Array(count);
+        for (let i = 0; i < count; i++) this.smokeAge[i] = (i % per) / per * 4;
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+        geometry.setAttribute('aAlpha', new THREE.BufferAttribute(alpha, 1));
+        const volcano = this.theme === 'Volcano';
+        const material = new THREE.ShaderMaterial({
+            transparent: true, depthWrite: false, fog: true,
+            uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), uColor: { value: new THREE.Color(volcano ? 0x4a4044 : 0xd8d4cc) }, uScale: { value: 420 } },
+            vertexShader: `#include <common>
+                #include <fog_pars_vertex>
+                attribute float aSize; attribute float aAlpha; varying float vAlpha; uniform float uScale;
+                void main(){ vAlpha = aAlpha; vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aSize * uScale / -mvPosition.z; gl_Position = projectionMatrix * mvPosition;
+                #include <fog_vertex>
+                }`,
+            fragmentShader: `#include <common>
+                #include <fog_pars_fragment>
+                uniform vec3 uColor; varying float vAlpha;
+                void main(){ vec2 d = gl_PointCoord - 0.5; float r = length(d); if (r > 0.5) discard; float a = smoothstep(0.5, 0.15, r) * vAlpha;
+                vec3 col = uColor * (0.85 + 0.3 * (0.5 - d.y)); gl_FragColor = vec4(col, a);
+                #include <fog_fragment>
+                }`,
+        });
+        this.smokeCloud = new THREE.Points(geometry, material);
+        this.smokeCloud.frustumCulled = false;
+        this.disposables.push(material, geometry);
+        this.group.add(this.smokeCloud);
+    }
+
+    updateSmoke(dt, wind) {
+        const g = this.smokeCloud.geometry;
+        const p = g.attributes.position.array, size = g.attributes.aSize.array, alpha = g.attributes.aAlpha.array;
+        const per = this.smokePer;
+        for (let i = 0; i < this.smokeAge.length; i++) {
+            const src = this.smokeSources[Math.floor(i / per)];
+            const life = src.size > 2 ? 6 : 4;
+            let age = this.smokeAge[i] += dt;
+            if (age > life) age = this.smokeAge[i] -= life;
+            const k = age / life;
+            const off = (i * 0.618) % 1;
+            p[i * 3] = src.x + (wind.x * 0.5 + Math.sin(off * 20 + age) * 0.2) * age * (src.size > 2 ? 1.2 : 0.6);
+            p[i * 3 + 1] = src.y + age * (src.size > 2 ? 1.6 : 0.55);
+            p[i * 3 + 2] = src.z + (wind.y * 0.5 + Math.cos(off * 17 + age) * 0.2) * age * (src.size > 2 ? 1.2 : 0.6);
+            size[i] = (0.25 + k * 1.1) * src.size;
+            alpha[i] = src.item?.gone ? 0 : Math.min(1, k * 6) * (1 - k) * (src.size > 2 ? 0.75 : 0.55);
+        }
+        g.attributes.position.needsUpdate = true;
+        g.attributes.aSize.needsUpdate = true;
+        g.attributes.aAlpha.needsUpdate = true;
+    }
+
+    /** Spray at the foot of the waterfall. */
+    mist(at) {
+        if (!at) return;
+        const count = 60;
+        const positions = new Float32Array(count * 3), colors = new Float32Array(count * 3).fill(1);
+        this.mistAt = at;
+        this.mistAge = new Float32Array(count).map((_, i) => (i / count) * 1.2);
+        this.mistCloud = this.pointCloud(positions, colors, 0.16, 0.7, false);
+    }
     // ---------------------------------------------------------------- bees, dragonflies
 
     bees(material) {
@@ -232,10 +394,12 @@ export class Life {
 
     gulls(material) {
         // seagulls; over the desert vultures circle instead
+        // over the autumn wood crows, over the desert vultures
         const vulture = this.theme === 'Desert';
+        const crow = this.theme === 'Autumn';
         const count = vulture ? 4 : 6;
-        const wing = vulture ? wingGeometry(0.75, 0.4, '#5a4636', '#1e1812') : wingGeometry(0.55, 0.32, '#f4f6f8', '#3a3f48');
-        const body = paint(new THREE.CapsuleGeometry(0.08, 0.35, 2, 6).rotateX(Math.PI / 2), vulture ? '#3a2e24' : '#ffffff');
+        const wing = vulture ? wingGeometry(0.75, 0.4, '#5a4636', '#1e1812') : crow ? wingGeometry(0.45, 0.28, '#1e1e26', '#0a0a10') : wingGeometry(0.55, 0.32, '#f4f6f8', '#3a3f48');
+        const body = paint(new THREE.CapsuleGeometry(0.08, 0.35, 2, 6).rotateX(Math.PI / 2), vulture ? '#3a2e24' : crow ? '#1a1a22' : '#ffffff');
         this.gullFlock = new Flock(count, wing, body, material);
         this.gullState = [];
         for (let i = 0; i < count; i++) {
@@ -430,7 +594,60 @@ export class Life {
             }
             this.dustCloud.geometry.attributes.position.needsUpdate = true;
         }
-        if (this.weeds) this.updateWeeds(dt, wind);
+        if (this.leaves) {
+            const p = this.leaves.geometry.attributes.position.array;
+            const W = this.data.width;
+            for (let i = 0; i < p.length; i += 3) {
+                p[i + 1] -= dt * (0.45 + (i % 5) * 0.06);
+                p[i] += dt * (wind.x * 0.35 + Math.sin(time * 1.3 + i) * 0.5);
+                p[i + 2] += dt * (wind.y * 0.35 + Math.cos(time * 1.1 + i * 0.7) * 0.5);
+                const ground = Math.max(this.data.heightAt(p[i], p[i + 2]), this.data.waterLevel);
+                if (p[i + 1] < ground) { p[i + 1] = ground + 8 + (i % 7); p[i] = -W * 0.1 + ((i * 7.31) % 1) * W * 1.2 + Math.sin(time) * 3; }
+            }
+            this.leaves.geometry.attributes.position.needsUpdate = true;
+        }
+        if (this.emberCloud) {
+            const p = this.emberCloud.geometry.attributes.position.array;
+            for (let i = 0; i < p.length; i += 3) {
+                p[i + 1] += dt * (0.6 + (i % 7) * 0.12);
+                p[i] += dt * (wind.x * 0.3 + Math.sin(time * 2.1 + i) * 0.3);
+                p[i + 2] += dt * (wind.y * 0.3 + Math.cos(time * 1.7 + i) * 0.3);
+                if (p[i + 1] > this.data.waterLevel + 11) p[i + 1] = this.data.waterLevel + 0.1;
+            }
+            this.emberCloud.geometry.attributes.position.needsUpdate = true;
+        }
+        if (this.ashCloud) {
+            const p = this.ashCloud.geometry.attributes.position.array;
+            for (let i = 0; i < p.length; i += 3) {
+                p[i + 1] -= dt * (0.35 + (i % 7) * 0.04);
+                p[i] += dt * (wind.x * 0.4 + Math.sin(time * 0.6 + i) * 0.12);
+                p[i + 2] += dt * (wind.y * 0.4 + Math.cos(time * 0.5 + i) * 0.12);
+                if (p[i + 1] < this.data.waterLevel - 0.5) p[i + 1] += 22;
+            }
+            this.ashCloud.geometry.attributes.position.needsUpdate = true;
+        }
+        if (this.parrotFlock) {
+            this.parrotState.forEach((g, i) => {
+                const a = g.phase + time * g.speed;
+                v.set(g.cx + Math.cos(a) * g.radius, g.height + Math.sin(time * 1.3 + i) * 0.8, g.cz + Math.sin(a) * g.radius);
+                const yaw = Math.atan2(-Math.sin(a), Math.cos(a)) + (g.speed > 0 ? 0 : Math.PI);
+                this.parrotFlock.set(i, v, yaw + Math.PI / 2, Math.sin(time * 14 + i) * 0.6, 0);
+            });
+            this.parrotFlock.commit();
+        }
+        if (this.smokeCloud) this.updateSmoke(dt, wind);
+        if (this.mistCloud) {
+            const p = this.mistCloud.geometry.attributes.position.array;
+            for (let i = 0; i < this.mistAge.length; i++) {
+                let age = this.mistAge[i] += dt;
+                if (age > 1.2) age = this.mistAge[i] -= 1.2;
+                const a = i * 2.4;
+                p[i * 3] = this.mistAt.x + Math.cos(a) * age * 0.7;
+                p[i * 3 + 1] = this.data.waterLevel + 0.1 + age * (1.2 - age) * 1.4;
+                p[i * 3 + 2] = this.mistAt.z + Math.sin(a) * age * 0.7;
+            }
+            this.mistCloud.geometry.attributes.position.needsUpdate = true;
+        }        if (this.weeds) this.updateWeeds(dt, wind);
         if (this.star) this.updateStar(dt, camera);
         for (let i = this.rings.length - 1; i >= 0; i--) {
             const r = this.rings[i];

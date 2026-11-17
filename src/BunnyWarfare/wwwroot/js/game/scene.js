@@ -8,6 +8,9 @@ const THEMES = {
     Snow: { sun: 0xf4f7ff, sunIntensity: 2.3, hemiSky: 0xe8f2ff, hemiGround: 0x8aa0b4, hemiIntensity: 1.35, exposure: 0.95 },
     Desert: { sun: 0xffe2b0, sunIntensity: 2.9, hemiSky: 0xfff0d0, hemiGround: 0xc09050, hemiIntensity: 1.15, exposure: 1.0 },
     Moon: { sun: 0xffffff, sunIntensity: 3.0, hemiSky: 0x8a90b8, hemiGround: 0x1c1c28, hemiIntensity: 0.65, exposure: 1.05 },
+    Autumn: { sun: 0xffd9a0, sunIntensity: 2.7, hemiSky: 0xffe6c4, hemiGround: 0x8a5a2a, hemiIntensity: 1.2, exposure: 1.0 },
+    Volcano: { sun: 0xffb07a, sunIntensity: 2.8, hemiSky: 0xb08080, hemiGround: 0x5a2a1c, hemiIntensity: 1.25, exposure: 1.1 },
+    Jungle: { sun: 0xfff4d0, sunIntensity: 2.6, hemiSky: 0xd8f4e6, hemiGround: 0x3a6a2a, hemiIntensity: 1.3, exposure: 1.0 },
 };
 
 /** The look of a theme: sky colours (for fog, water reflection), light. */
@@ -87,7 +90,8 @@ export class Stage {
         this.camera.updateProjectionMatrix();
 
         // the sun: high in the south-west, a little warmer in the desert
-        const sunDirection = themeName === 'Desert' ? new THREE.Vector3(0.55, 0.62, -0.5) : themeName === 'Moon' ? new THREE.Vector3(-0.6, 0.55, -0.45) : new THREE.Vector3(0.45, 0.78, -0.42);
+        const sunDirection = themeName === 'Desert' ? new THREE.Vector3(0.55, 0.62, -0.5) : themeName === 'Moon' ? new THREE.Vector3(-0.6, 0.55, -0.45)
+            : themeName === 'Autumn' ? new THREE.Vector3(0.6, 0.5, -0.45) : themeName === 'Volcano' ? new THREE.Vector3(-0.55, 0.42, -0.5) : new THREE.Vector3(0.45, 0.78, -0.42);
         this.sunDirection = sunDirection.normalize();
 
         this.scene.background = new THREE.Color(style.horizon);

@@ -120,6 +120,27 @@ namespace BunnyWarfare.Data.Migrations
                     b.Property<int>("DamageDealt")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Face")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("none");
+
+                    b.Property<string>("Frame")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("wood");
+
+                    b.Property<string>("Fur")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("snow");
+
                     b.Property<bool>("IsBot")
                         .HasColumnType("boolean");
 
@@ -128,6 +149,13 @@ namespace BunnyWarfare.Data.Migrations
 
                     b.Property<long>("MatchId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("Outfit")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("helmet");
 
                     b.Property<int>("Placement")
                         .HasColumnType("integer");
@@ -153,6 +181,11 @@ namespace BunnyWarfare.Data.Migrations
 
                     b.Property<long?>("UpdateUserId")
                         .HasColumnType("bigint");
+
+                    b.Property<int>("XpGained")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.HasKey("Id");
 
@@ -186,6 +219,27 @@ namespace BunnyWarfare.Data.Migrations
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)");
 
+                    b.Property<string>("Face")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("none");
+
+                    b.Property<string>("Frame")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("wood");
+
+                    b.Property<string>("Fur")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("snow");
+
                     b.Property<int>("GamesPlayed")
                         .HasColumnType("integer");
 
@@ -205,6 +259,13 @@ namespace BunnyWarfare.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Outfit")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("helmet");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -232,6 +293,11 @@ namespace BunnyWarfare.Data.Migrations
 
                     b.Property<long?>("UpdateUserId")
                         .HasColumnType("bigint");
+
+                    b.Property<int>("Xp")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.HasKey("Id");
 

@@ -30,7 +30,14 @@ Errors (not your turn, no ammo ...) arrive as a `HubException` with a German mes
 | `Aim` | `AimDto` | the player of the turn aims (or a bot) |
 | `Shot` | `ShotResult` | a shot: everything it does, in time order |
 | `Chat` | `ChatDto` (`system = true` for messages of the game) | |
-| `GameOver` | `ResultDto` (winner, ranking; `aborted`) | the match ended |
+| `GameOver` | `ResultDto` (winner, ranking; `aborted`; per team the look, and for players `xpGained`, `levelBefore`, `levelAfter`, `unlocked[{ kind, key, name }]`) | the match ended |
+
+## Looks and levels
+
+Every team carries how its bunnies look: `fur`, `outfit`, `face` (keys of `Business/Cosmetics.cs`, drawn by `bunny.js`) and `frame` (the frame of its portrait, `portrait.js`),
+plus `level` (players: from their XP; bots: a level by their strength). They are in `TeamDto`, the lobby slots (`LobbySlotDto`) and `TeamResultDto`.
+The XP of a match (`Cosmetics.XpForMatch`: 25 + 10 per place above 4th for taking part, only when the team won, hit or knocked out something; + 75 for the win + 30 per K.O. + damage/4 up to 300) goes to players only, never for an aborted match;
+the result computes it in the room (from the player's progress when they took the seat), `MatchLogic.FinishAsync` saves the same number.
 
 ## Coordinates and the height map
 
@@ -65,20 +72,21 @@ Errors: `400 { error, field }` (field in camelCase or null), `401` not signed in
 
 | Method | Path | Body / query | Answer |
 |---|---|---|---|
-| GET | `/api/session` (anonymous) | | `{ signedIn, player: { id, displayName, loginName, isAdmin, teamName, teamColor } \| null, canRegister, firstRun, version, antiforgery }` |
+| GET | `/api/session` (anonymous) | | `{ signedIn, player: { id, displayName, loginName, isAdmin, teamName, teamColor, fur, outfit, face, frame, level } \| null, canRegister, firstRun, version, antiforgery }` |
 | POST | `/api/session/login` (anonymous) | `{ loginName, password }` | session |
 | POST | `/api/session/register` (anonymous) | `{ displayName, loginName, password }` | session (the first account becomes the administrator) |
 | POST | `/api/session/logout` | | `{ ok }` |
 | GET | `/api/showcase?worldId=` (anonymous) | | `{ world: WorldDto, teams, bunnies }` — the island behind the menu |
-| GET | `/api/home` | | `{ announcement, stats: { gamesPlayed, gamesWon, kills, damageDealt, rank }, history[] }` |
+| GET | `/api/home` | | `{ player: { level, xp, fur, outfit, face, frame, teamColor }, announcement, stats: { gamesPlayed, gamesWon, kills, damageDealt, rank }, history[] (with xpGained) }` |
 | GET | `/api/settings` | | `{ defaultTurnSeconds, maxTeamsPerMatch }` |
 | GET | `/api/worlds` | | `[{ id, name, description, theme, themeName, gridSize, width, gravity, maxWind }]` |
 | GET | `/api/worlds/{id}/terrain` | | `WorldDto` (height map for previews) |
 | GET | `/api/matches` | `q, status (lobby\|running\|mine), page` | `{ items[{ token, name, worldName, theme, hostName, status, maxTeams, seats, bunniesPerTeam, turnSeconds, createDate, isMine }], matching, total }` |
 | POST | `/api/matches` | `{ name, worldId, maxTeams, bunniesPerTeam, bunnyHealth, turnSeconds, isPublic }` | `{ token }` |
 | POST | `/api/matches/quick` | `{ worldId?, bots, level }` | `{ token }` (the app joins, adds the bots and starts) |
-| GET | `/api/leaderboard` | `q, sort (rank\|name\|games\|kills\|damage), dir, page` | `{ items[], matching, total }` |
-| GET/PUT | `/api/profile` | `{ displayName, teamName, teamColor }` | `{ displayName, loginName, teamName, teamColor, colors[] }` |
+| GET | `/api/leaderboard` | `q, sort (rank\|level\|name\|games\|kills\|damage), dir, page` | `{ items[] (with level, fur, outfit, face, frame), matching, total }` |
+| GET/PUT | `/api/profile` | `{ displayName, teamName, teamColor }` | `{ displayName, loginName, teamName, teamColor, fur, outfit, face, frame, level, xp, xpAtLevel, xpForNext, maxLevel, stats, wardrobe[{ kind, name, items[{ key, name, unlocked, requirement, wild, level }] }], colors[] }` |
+| PUT | `/api/profile/look` | `{ fur, outfit, face, frame }` | the profile; `400` when an item is unknown or still locked (`field` = the kind) |
 | POST | `/api/profile/password` | `{ currentPassword, newPassword }` | `{ ok }` |
 
 Unauthenticated requests to `/api` and `/hub` get `401`; pages of the administration redirect to `/?returnUrl=...`, where the app signs in and returns.

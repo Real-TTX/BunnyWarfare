@@ -8,13 +8,13 @@ public sealed record MatchInput(string Name, long WorldId, int MaxTeams, int Bun
 public sealed record OpenMatchRow(Guid Token, string Name, string WorldName, WorldTheme Theme, string HostName, MatchStatus Status, int MaxTeams, int BunniesPerTeam,
     int TurnSeconds, DateTime CreateDate, bool IsMine);
 
-public sealed record MatchHistoryRow(Guid Token, string Name, string WorldName, MatchStatus Status, DateTime? EndDate, int Placement, int Kills, int DamageDealt);
+public sealed record MatchHistoryRow(Guid Token, string Name, string WorldName, MatchStatus Status, DateTime? EndDate, int Placement, int Kills, int DamageDealt, int XpGained);
 
 public sealed record MatchAdminRow(long Id, Guid Token, string Name, string WorldName, string HostName, MatchStatus Status, bool IsPublic, int Teams, DateTime CreateDate,
     DateTime? StartDate, DateTime? EndDate, string? WinnerName);
 
 /// <summary>A team as the lobby sends it into a starting match.</summary>
-public sealed record TeamSlot(int TeamIndex, long? PlayerId, bool IsBot, BotLevel BotLevel, string TeamName, string TeamColor);
+public sealed record TeamSlot(int TeamIndex, long? PlayerId, bool IsBot, BotLevel BotLevel, string TeamName, string TeamColor, Look Look);
 
 /// <summary>The outcome of one team when a match ends.</summary>
 public sealed record TeamOutcome(int TeamIndex, int Kills, int DamageDealt, int Placement);
@@ -133,7 +133,7 @@ public static class MatchLogic
         return await db.MatchTeams.Where(t => t.PlayerId == actor.PlayerId && (t.Match!.Status == MatchStatus.Finished || t.Match.Status == MatchStatus.Aborted))
             .OrderByDescending(t => t.Match!.EndDate)
             .Take(count)
-            .Select(t => new MatchHistoryRow(t.Match!.Token, t.Match.Name, t.Match.World!.Name, t.Match.Status, t.Match.EndDate, t.Placement, t.Kills, t.DamageDealt))
+            .Select(t => new MatchHistoryRow(t.Match!.Token, t.Match.Name, t.Match.World!.Name, t.Match.Status, t.Match.EndDate, t.Placement, t.Kills, t.DamageDealt, t.XpGained))
             .ToListAsync();
     }
 
@@ -169,6 +169,7 @@ public static class MatchLogic
             match.Teams.Add(new MatchTeam
             {
                 TeamIndex = t.TeamIndex, PlayerId = t.PlayerId, IsBot = t.IsBot, BotLevel = t.BotLevel, TeamName = t.TeamName, TeamColor = t.TeamColor,
+                Fur = t.Look.Fur, Outfit = t.Look.Outfit, Face = t.Look.Face, Frame = t.Look.Frame,
             });
         }
 
@@ -177,7 +178,7 @@ public static class MatchLogic
         await db.ActingAs(actor.AuditId).SaveChangesAsync();
     }
 
-    /// <summary>Writes the outcome of a match and adds it to the statistics of its players (the game loop, as the system).</summary>
+    /// <summary>Writes the outcome of a match and adds it to the statistics and the experience of its players (the game loop, as the system; once per match).</summary>
     public static async Task FinishAsync(AppDbContext db, Actor actor, long matchId, int? winnerTeamIndex, int turnCount, IReadOnlyList<TeamOutcome> outcomes, bool aborted)
     {
         Guard.Admin(actor);
@@ -202,8 +203,11 @@ public static class MatchLogic
             team.Kills = outcome.Kills;
             team.DamageDealt = outcome.DamageDealt;
             team.Placement = outcome.Placement;
-            if (team.Player is { } player && !aborted)
+            if (team.Player is { } player && !team.IsBot && !aborted)
             {
+                var won = winnerTeamIndex == team.TeamIndex;
+                team.XpGained = Cosmetics.XpForMatch(won, outcome.Placement, outcome.Kills, outcome.DamageDealt, aborted);
+                player.Xp += team.XpGained;
                 player.GamesPlayed++;
                 player.Kills += outcome.Kills;
                 player.DamageDealt += outcome.DamageDealt;

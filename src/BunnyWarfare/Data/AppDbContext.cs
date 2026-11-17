@@ -40,6 +40,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(p => p.TeamName).HasMaxLength(40);
             e.Property(p => p.TeamColor).HasMaxLength(7);
             e.Property(p => p.PasswordHash).HasMaxLength(200);
+            e.Property(p => p.Xp).HasDefaultValue(0);
+            e.Property(p => p.Fur).HasMaxLength(24).HasDefaultValue("snow");
+            e.Property(p => p.Outfit).HasMaxLength(24).HasDefaultValue("helmet");
+            e.Property(p => p.Face).HasMaxLength(24).HasDefaultValue("none");
+            e.Property(p => p.Frame).HasMaxLength(24).HasDefaultValue("wood");
             e.HasIndex(p => p.LoginName).IsUnique();
         });
 
@@ -73,6 +78,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("MatchTeam");
             e.Property(t => t.TeamName).HasMaxLength(40);
             e.Property(t => t.TeamColor).HasMaxLength(7);
+            e.Property(t => t.Fur).HasMaxLength(24).HasDefaultValue("snow");
+            e.Property(t => t.Outfit).HasMaxLength(24).HasDefaultValue("helmet");
+            e.Property(t => t.Face).HasMaxLength(24).HasDefaultValue("none");
+            e.Property(t => t.Frame).HasMaxLength(24).HasDefaultValue("wood");
+            e.Property(t => t.XpGained).HasDefaultValue(0);
             e.HasOne(t => t.Player).WithMany().HasForeignKey(t => t.PlayerId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(t => new { t.MatchId, t.TeamIndex }).IsUnique();
         });

@@ -183,7 +183,8 @@ public sealed class GameHub(AppDbContext db, RoomRegistry registry, ILogger<Game
     private static RoomDto Archived(Match match)
     {
         var teams = match.Teams.OrderBy(t => t.Placement == 0 ? int.MaxValue : t.Placement)
-            .Select(t => new TeamResultDto(t.TeamIndex, t.TeamName, t.TeamColor, t.Placement, t.Kills, t.DamageDealt, t.IsBot)).ToList();
+            .Select(t => new TeamResultDto(t.TeamIndex, t.TeamName, t.TeamColor, t.Placement, t.Kills, t.DamageDealt, t.IsBot, t.Fur, t.Outfit, t.Face, t.Frame, 0, t.XpGained, 0, 0, []))
+            .ToList();
         var winner = match.Teams.FirstOrDefault(t => t.TeamIndex == match.WinnerTeamIndex);
         var aborted = match.Status != MatchStatus.Finished;
         var result = new ResultDto(winner?.TeamIndex, winner?.TeamName, aborted, teams);

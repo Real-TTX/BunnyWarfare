@@ -17,6 +17,7 @@
             <md-tab-button panel="player-security" icon="lock" active="@(tab == "security")">Sicherheit</md-tab-button>
             @if (!Model.IsNew)
             {
+                <md-tab-button panel="player-progress" icon="star" active="@(tab == "progress")">Fortschritt</md-tab-button>
                 <md-tab-button panel="player-stats" icon="bar-chart" active="@(tab == "stats")">Statistik</md-tab-button>
             }
         </md-tab-group>
@@ -42,6 +43,23 @@
                 </div>
             </div>
         </md-tab-panel>
+
+        @if (!Model.IsNew)
+        {
+            <md-tab-panel id="player-progress" active="@(tab == "progress")">
+                <div class="mat-card">
+                    <div class="mat-card__body mat-form">
+                        <md-field name="Xp" kind="number" label="Erfahrung (XP)" value="@Model.Xp.ToString(System.Globalization.CultureInfo.InvariantCulture)" min="0" mono="true"
+                                  hint="@($"Level {Model.Level} von {Cosmetics.MaxLevel} · Level {Math.Min(Cosmetics.MaxLevel, Model.Level + 1)} ab {Cosmetics.XpAt(Math.Min(Cosmetics.MaxLevel, Model.Level + 1))} XP")" />
+                        <md-field name="Fur" kind="select" label="Fell" value="@Model.Fur" options="Model.ChoicesOf(Cosmetics.Furs)" />
+                        <md-field name="Outfit" kind="select" label="Hut" value="@Model.Outfit" options="Model.ChoicesOf(Cosmetics.Outfits)" />
+                        <md-field name="Face" kind="select" label="Gesicht" value="@Model.Face" options="Model.ChoicesOf(Cosmetics.Faces)" />
+                        <md-field name="Frame" kind="select" label="Porträtrahmen" value="@Model.Frame" options="Model.ChoicesOf(Cosmetics.Frames)"
+                                  hint="Die Administration darf auch gesperrte Sachen vergeben." />
+                    </div>
+                </div>
+            </md-tab-panel>
+        }
 
         @if (!Model.IsNew && Model.Stats is { } s)
         {

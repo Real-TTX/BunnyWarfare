@@ -72,6 +72,9 @@
 .bw-theme--snow { --bw-theme: #c9d6e3; }
 .bw-theme--desert { --bw-theme: #e0b46c; }
 .bw-theme--moon { --bw-theme: #8c8c94; }
+.bw-theme--autumn { --bw-theme: #e0742a; }
+.bw-theme--volcano { --bw-theme: #c2361a; }
+.bw-theme--jungle { --bw-theme: #2f8a3a; }
 
 /* ---- world form: the fields and the preview side by side ---- */
 .bw-split { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--mat-space-5); align-items: start; }

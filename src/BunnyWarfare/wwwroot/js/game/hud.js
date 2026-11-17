@@ -1,7 +1,8 @@
 // Everything on top of a match: the lobby room, the turn banner, timer, wind, teams, weapons, power, chat and the end with its podium.
 import { $, el, icon, button, toast, copyText, themeName, LEVEL_NAMES } from './ui.js';
-import { weaponIcon, seatBadge, bunnyAvatar } from './icons.js';
+import { weaponIcon, seatBadge } from './icons.js';
 import { mapCanvasByName } from './maps.js';
+import { portrait } from './avatars.js';
 
 export class Hud {
     constructor() {
@@ -9,6 +10,7 @@ export class Hud {
         this.weaponButtons = new Map();
         this.lobbyMap = null;
         this.chatLogs = [$('bw-chat-log')];
+        this.teamPortraits = new Map(); // "index|look" -> portrait element (kept between redraws: no flicker)
     }
 
     show(on) {
@@ -45,7 +47,7 @@ export class Hud {
                     className: 'round-btn small', iconName: 'x', title: host ? 'Entfernen' : 'Platz freigeben', onClick: () => actions.remove(s.teamIndex),
                 }));
             }
-            li.append(seatBadge(s.color, s.isBot), text, actionsBox);
+            li.append(portrait(s, { size: 54, level: s.level || null, className: s.isBot ? 'is-bot' : '' }), text, actionsBox);
             slots.append(li);
         }
         for (let i = room.slots.length; i < room.maxTeams; i++) {
@@ -177,10 +179,7 @@ export class Hud {
         const classes = ['second', 'first', 'third'];
         order.forEach((t, i) => {
             if (!t) return;
-            const avatar = el('div', 'avatar');
-            avatar.style.setProperty('--team', t.color);
-            avatar.style.background = t.color;
-            avatar.append(bunnyAvatar(t.color, { wink: i === 1 }));
+            const avatar = portrait(t, { size: i === 1 ? 92 : 74, level: (t.levelAfter || t.level) || null, className: 'podium-portrait' });
             podium.append(el('div', `place ${classes[i]}`, [
                 el('div', 'who', [avatar, el('b', null, t.name), el('small', null, `${t.kills} K.O. · ${t.damage} Schaden`)]),
                 el('div', 'block', String(t.placement || '–')),
@@ -206,6 +205,7 @@ export class Hud {
         const panel = el('section', 'panel', [
             el('div', 'over-head', [el('div', 'crown', result.aborted ? '🏳️' : won ? '🏆' : result.winnerName ? '🥕' : '🤝'), el('h2', 'title', title), el('p', 'lead muted', sub)]),
             podium,
+            this.xpGain(teams.find(t => t.index === myTeam && !t.isBot), result.aborted),
             table,
             el('div', 'panel-foot', [
                 actions.view ? button('Insel ansehen', { className: 'btn ghost', iconName: 'eye', onClick: () => actions.view() }) : null,
@@ -215,6 +215,29 @@ export class Hud {
             ]),
         ]);
         layer.replaceChildren(panel);
+    }
+
+    /** What the match brought the own team: XP, a level up, new things for the wardrobe. */
+    xpGain(mine, aborted) {
+        if (!mine) return null;
+        if (aborted || !mine.xpGained) return el('div', 'xp-gain is-none', [el('span', 'muted', aborted ? 'Abgebrochene Spiele bringen keine XP.' : 'Diesmal gab es keine XP.')]);
+        const up = mine.levelAfter > mine.levelBefore;
+        const unlocked = mine.unlocked ?? [];
+        const kinds = { fur: 'Fell', outfit: 'Hut', face: 'Gesicht', frame: 'Rahmen' };
+        const box = el('div', `xp-gain${up ? ' is-up' : ''}`, [
+            portrait(mine, { size: 64, level: mine.levelAfter, className: up ? 'pop' : '' }),
+            el('div', 'xp-text', [
+                el('b', 'xp-plus', `+${mine.xpGained} XP`),
+                up ? el('span', 'levelup', `Level ${mine.levelAfter}!`) : el('span', 'muted', `Level ${mine.levelAfter}`),
+            ]),
+        ]);
+        if (unlocked.length) {
+            box.append(el('div', 'unlocks', [
+                el('small', null, 'Neu im Kleiderschrank:'),
+                el('div', 'row', unlocked.slice(0, 6).map(u => el('span', 'unlock', [portrait({ ...mine, [u.kind]: u.key }, { size: 40 }), el('span', null, [el('b', null, u.name), el('small', null, kinds[u.kind] ?? '')])]))),
+            ]));
+        }
+        return box;
     }
 
     hideOver() {
@@ -274,13 +297,17 @@ export class Hud {
             const hp = own.reduce((sum, b) => sum + Math.max(0, b.health), 0);
             const max = own.reduce((sum, b) => sum + b.maxHealth, 0) || 1;
             const alive = own.filter(b => b.alive !== false && b.health > 0).length;
-            const sw = el('span', 'swatch');
-            sw.style.setProperty('--c', t.color);
+            const key = `${t.index}|${t.fur}|${t.outfit}|${t.face}|${t.frame}|${t.color}`;
+            let face = this.teamPortraits.get(key);
+            if (!face) {
+                face = portrait(t, { size: 30, level: t.level || null, className: 'mini' });
+                this.teamPortraits.set(key, face);
+            }
             const fill = el('i');
             fill.style.width = `${(hp / max) * 100}%`;
             fill.style.background = t.color;
             const row = el('div', `hteam${t.index === currentTeam ? ' is-current' : ''}${t.out ? ' is-out' : ''}`, [
-                el('div', 'head', [sw, el('span', 'name', t.name + (t.isBot ? ' · Bot' : '')), el('span', null, String(hp))]),
+                el('div', 'head', [face, el('span', 'name', t.name + (t.isBot ? ' · Bot' : '')), el('span', null, String(hp))]),
                 el('div', 'bar', fill),
                 el('small', null, `${alive} Hasen${t.kills > 0 ? ` · ${t.kills} K.O.` : ''}`),
             ]);

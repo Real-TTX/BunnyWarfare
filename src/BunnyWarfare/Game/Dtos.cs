@@ -2,11 +2,14 @@ namespace BunnyWarfare.Game;
 
 // What the hub sends to the browsers (SignalR writes the names in camelCase). The protocol is described in docs/PROTOCOL.md.
 
-public sealed record LobbySlotDto(int TeamIndex, long? PlayerId, string PlayerName, string TeamName, string Color, bool IsBot, string BotLevel, bool Connected);
+public sealed record LobbySlotDto(int TeamIndex, long? PlayerId, string PlayerName, string TeamName, string Color, bool IsBot, string BotLevel, bool Connected,
+    string Fur, string Outfit, string Face, string Frame, int Level);
 
 public sealed record WorldDto(string Name, int Size, double CellSize, string Theme, double WaterLevel, double Gravity, double MaxWind, string Heights);
 
-public sealed record TeamDto(int Index, string Name, string Color, long? PlayerId, bool IsBot, IReadOnlyDictionary<string, int> Ammo, bool Out, int Kills, int Damage);
+/// <summary>A team of the match; fur/outfit/face are how its bunnies look (keys of Business.Cosmetics), frame the frame of its portrait.</summary>
+public sealed record TeamDto(int Index, string Name, string Color, long? PlayerId, bool IsBot, IReadOnlyDictionary<string, int> Ammo, bool Out, int Kills, int Damage,
+    string Fur, string Outfit, string Face, string Frame, int Level);
 
 public sealed record BunnyDto(int Id, int Team, string Name, double X, double Y, double Z, double Yaw, int Health, int MaxHealth);
 
@@ -16,7 +19,9 @@ public sealed record TurnDto(int Number, int Team, int BunnyId, string Phase, in
 
 public sealed record GameDto(WorldDto World, IReadOnlyList<TeamDto> Teams, IReadOnlyList<BunnyDto> Bunnies, IReadOnlyList<WeaponDto> Weapons, TurnDto Turn);
 
-public sealed record TeamResultDto(int Index, string Name, string Color, int Placement, int Kills, int Damage, bool IsBot);
+/// <summary>A team at the end of a match; for a player's team also the experience it brought (xpGained), the level before and after, and what it unlocked.</summary>
+public sealed record TeamResultDto(int Index, string Name, string Color, int Placement, int Kills, int Damage, bool IsBot, string Fur, string Outfit, string Face, string Frame,
+    int Level, int XpGained, int LevelBefore, int LevelAfter, IReadOnlyList<Business.Unlock> Unlocked);
 
 public sealed record ResultDto(int? WinnerTeam, string? WinnerName, bool Aborted, IReadOnlyList<TeamResultDto> Teams);
 

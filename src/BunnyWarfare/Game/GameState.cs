@@ -81,6 +81,13 @@ public sealed class TeamState
 
     public BotLevel BotLevel { get; init; }
 
+    public Business.Look Look { get; init; } = Business.Look.Default;
+
+    /// <summary>What the player had earned at the start (null for bots).</summary>
+    public Business.Progress? Progress { get; init; }
+
+    public int Level { get; init; }
+
     /// <summary>Shots left per weapon (only weapons with limited ammo are in it).</summary>
     public Dictionary<long, int> Ammo { get; } = [];
 

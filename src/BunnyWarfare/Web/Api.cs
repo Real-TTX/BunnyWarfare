@@ -26,6 +26,8 @@ public static class Api
 
     public sealed record PasswordRequest(string? CurrentPassword, string? NewPassword);
 
+    public sealed record LookRequest(string? Fur, string? Outfit, string? Face, string? Frame);
+
     public static void MapApi(this WebApplication app)
     {
         var api = app.MapGroup("/api").AddEndpointFilter(Errors).AddEndpointFilter(Antiforgery);
@@ -61,11 +63,13 @@ public static class Api
             var settings = await SettingLogic.GetAsync(db);
             var stats = await PlayerLogic.StatsAsync(db, me);
             var history = await MatchLogic.HistoryAsync(db, me);
+            var player = await PlayerLogic.GetAsync(db, me, me.PlayerId) ?? throw new AccessDeniedException();
             return Results.Ok(new
             {
+                player = new { level = Cosmetics.LevelOf(player.Xp), player.Xp, player.Fur, player.Outfit, player.Face, player.Frame, player.TeamColor },
                 announcement = settings.Announcement,
                 stats = new { stats.GamesPlayed, stats.GamesWon, stats.Kills, stats.DamageDealt, stats.Rank },
-                history = history.Select(h => new { h.Token, h.Name, h.WorldName, status = h.Status.ToString(), h.EndDate, h.Placement, h.Kills, h.DamageDealt }),
+                history = history.Select(h => new { h.Token, h.Name, h.WorldName, status = h.Status.ToString(), h.EndDate, h.Placement, h.Kills, h.DamageDealt, h.XpGained }),
             });
         });
 
@@ -148,6 +152,12 @@ public static class Api
             await PlayerLogic.UpdateProfileAsync(db, me, new ProfileInput(body.DisplayName ?? string.Empty, body.TeamName ?? string.Empty, body.TeamColor ?? string.Empty));
             return Results.Ok(await ProfileAsync(db, me));
         });
+        api.MapPut("/profile/look", async (LookRequest body, HttpContext http, AppDbContext db) =>
+        {
+            var me = Me(http);
+            await PlayerLogic.SaveLookAsync(db, me, new Look(body.Fur ?? string.Empty, body.Outfit ?? string.Empty, body.Face ?? string.Empty, body.Frame ?? string.Empty));
+            return Results.Ok(await ProfileAsync(db, me));
+        });
         api.MapPost("/profile/password", async (PasswordRequest body, HttpContext http, AppDbContext db) =>
         {
             await PlayerLogic.ChangePasswordAsync(db, Me(http), body.CurrentPassword ?? string.Empty, body.NewPassword ?? string.Empty);
@@ -186,7 +196,11 @@ public static class Api
             signedIn = player is not null,
             player = player is null
                 ? null
-                : new { player.Id, player.DisplayName, player.LoginName, isAdmin = player.Role == PlayerRole.Admin, player.TeamName, player.TeamColor },
+                : new
+                {
+                    player.Id, player.DisplayName, player.LoginName, isAdmin = player.Role == PlayerRole.Admin, player.TeamName, player.TeamColor,
+                    player.Fur, player.Outfit, player.Face, player.Frame, level = Cosmetics.LevelOf(player.Xp),
+                },
             canRegister = await PlayerLogic.CanRegisterAsync(db),
             firstRun = first,
             version = AppInfo.Version,
@@ -196,10 +210,14 @@ public static class Api
 
     private static async Task<object> ProfileAsync(AppDbContext db, Actor me)
     {
-        var p = await PlayerLogic.GetAsync(db, me, me.PlayerId) ?? throw new AccessDeniedException();
+        var p = await PlayerLogic.ProfileAsync(db, me);
         return new
         {
             p.DisplayName, p.LoginName, p.TeamName, p.TeamColor,
+            p.Look.Fur, p.Look.Outfit, p.Look.Face, p.Look.Frame,
+            p.Level, p.Xp, p.XpAtLevel, p.XpForNext, p.MaxLevel,
+            stats = new { p.Stats.GamesPlayed, p.Stats.GamesWon, p.Stats.Kills, p.Stats.DamageDealt, p.Stats.Rank },
+            wardrobe = p.Wardrobe,
             colors = PlayerLogic.TeamColors.Select(c => new { value = c.Value, label = c.Label }),
         };
     }

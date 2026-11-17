@@ -97,9 +97,21 @@ const PALETTES = {
         grassA: '#9c9ca4', grassB: '#b4b4ba', grassDry: '#86868e', dirt: '#6a6a72', sand: '#8e8e96', wetSand: '#5d5d66', seabed: '#3b3b44',
         rock: '#71727b', rockDark: '#45464e', snow: '#d6d6dc', scorch: '#1c1c22', soil: '#55555e',
     },
+    Autumn: {
+        grassA: '#8a9a3a', grassB: '#b8a43e', grassDry: '#c88a3a', dirt: '#6a4628', sand: '#e2cc94', wetSand: '#a8905e', seabed: '#b8a272',
+        rock: '#8f857a', rockDark: '#564c44', snow: '#f4ede0', scorch: '#2b1d14', soil: '#4f3420',
+    },
+    Volcano: {
+        grassA: '#5e5458', grassB: '#73676a', grassDry: '#86706a', dirt: '#3e3438', sand: '#4a4248', wetSand: '#2a2428', seabed: '#120e10',
+        rock: '#615a66', rockDark: '#2e2a34', snow: '#9a9098', scorch: '#0e0a0a', soil: '#4a2a1c',
+    },
+    Jungle: {
+        grassA: '#3f8a2c', grassB: '#5aa83a', grassDry: '#7a9a3a', dirt: '#6a4a2a', sand: '#e8d6a0', wetSand: '#a89a66', seabed: '#9aa078',
+        rock: '#7d8a72', rockDark: '#424c3a', snow: '#eef4e6', scorch: '#22180e', soil: '#4a301c',
+    },
 };
 
-const THEME_INDEX = { Meadow: 0, Snow: 1, Desert: 2, Moon: 3 };
+const THEME_INDEX = { Meadow: 0, Snow: 1, Desert: 2, Moon: 3, Autumn: 4, Volcano: 5, Jungle: 6 };
 
 export function paletteOf(theme) {
     const p = PALETTES[theme] ?? PALETTES.Meadow;
@@ -143,6 +155,7 @@ export function createGroundMaterial(theme, waterLevel, top) {
                 ${colorUniforms}
                 ${GLSL_NOISE}
                 float bwPix; // metres per pixel here
+                float bwGlow; // the glow of the lava in the cracks (volcano), added as emission
                 // 1 while a pattern of this frequency (per metre) is larger than a few pixels, 0 when it would only shimmer
                 float bwFade(float freq) { return clamp(1.6 - bwPix * freq * 2.2, 0.0, 1.0); }
                 vec3 bwGround(vec3 wp, vec3 n, vec2 info, out float bump) {
@@ -154,8 +167,9 @@ export function createGroundMaterial(theme, waterLevel, top) {
                     float fD = bwFade(6.0), fF = bwFade(26.0);
                     bump = (fine * 0.6 + bwNoise(wp.xz * 7.3) * 0.4) * fD;
                     vec3 c;
-                #if BW_THEME == 0
-                    // meadow: two greens in big patches, dry spots, clumps of grass with blades, tiny flowers, trodden paths with pebbles
+                    bwGlow = 0.0;
+                #if BW_THEME == 0 || BW_THEME == 4 || BW_THEME == 6
+                    // meadow (and autumn, jungle in their colours): two greens in big patches, dry spots, clumps of grass with blades, tiny flowers, trodden paths with pebbles
                     c = mix(c_grassA, c_grassB, smoothstep(0.35, 0.7, big));
                     c = mix(c, c_grassDry, smoothstep(0.62, 0.8, mid) * 0.55);
                     vec3 tuft = bwVoronoi(wp.xz * 3.2);
@@ -175,6 +189,21 @@ export function createGroundMaterial(theme, waterLevel, top) {
                     earth = mix(earth, mix(c_rock, c_snow, 0.3) * (0.75 + 0.4 * peb.z), pebble);
                     c = mix(c, earth, path * 0.85);
                     bump += path * pebble * 1.4;
+                #if BW_THEME == 4
+                    // autumn: fallen leaves everywhere, in reds, oranges and yellows
+                    vec3 lf = bwVoronoi(wp.xz * 4.2 + 1.3);
+                    float leaf = smoothstep(0.32, 0.18, lf.x) * step(0.45, lf.z) * bwFade(12.0);
+                    vec3 leafCol = lf.z > 0.85 ? vec3(0.95, 0.75, 0.2) : lf.z > 0.68 ? vec3(0.85, 0.28, 0.1) : vec3(0.92, 0.48, 0.12);
+                    c = mix(c, leafCol * (0.8 + 0.3 * fine), leaf * 0.85);
+                    bump += leaf * 0.6;
+                #elif BW_THEME == 6
+                    // jungle: dark moss, leaf litter and wet mud in the hollows
+                    c = mix(c, c_grassA * 0.7, smoothstep(0.4, 0.75, mid) * 0.5);
+                    vec3 lit = bwVoronoi(wp.xz * 3.3 + 7.7);
+                    float litter = smoothstep(0.3, 0.16, lit.x) * step(0.6, lit.z) * bwFade(12.0);
+                    c = mix(c, mix(c_dirt, c_grassDry, lit.z) * 0.9, litter * 0.6);
+                    c = mix(c, c_dirt * 0.6, smoothstep(0.62, 0.45, info.x) * 0.5);
+                #endif
                 #elif BW_THEME == 1
                     // snow: soft lumps, wind ridges with blue shadows, sparkles
                     c = mix(c_grassB, c_grassA, smoothstep(0.3, 0.75, big));
@@ -203,6 +232,21 @@ export function createGroundMaterial(theme, waterLevel, top) {
                     float gap = smoothstep(0.07, 0.0, crack.y - crack.x) * crust * fD;
                     c = mix(c, c_dirt * 0.55, gap);
                     bump -= gap * 1.5;
+                #elif BW_THEME == 5
+                    // volcano: black ash and basalt, cooled lava in ropes, glowing cracks that pulse (more of them low down, near the lava)
+                    c = mix(c_grassA, c_grassB, smoothstep(0.3, 0.7, big));
+                    c = mix(c, c_grassDry, smoothstep(0.55, 0.85, mid) * 0.5);
+                    float rope = sin((wp.x * 0.7 + wp.z * 0.5) * 6.0 + mid * 12.0) * 0.5 + 0.5;
+                    c *= mix(1.0, 0.85 + 0.25 * rope, fD);
+                    bump += rope * 0.8 * fD;
+                    vec3 cr = bwVoronoi(wp.xz * 0.45 + bwFbm(wp.xz * 0.2) * 1.5 + 2.0);
+                    float vein = smoothstep(0.035, 0.0, cr.y - cr.x);
+                    float hotZone = smoothstep(0.74, 0.64, bwFbm(wp.xz * 0.06 + 4.0)) * 0.55 + smoothstep(0.9, 0.1, a);
+                    float pulse = 0.75 + 0.25 * sin(wp.x * 0.3 + wp.z * 0.2 + cr.z * 6.0);
+                    bwGlow = vein * clamp(hotZone, 0.0, 1.0) * pulse * (1.0 - smoothstep(0.25, 0.45, slope));
+                    c = mix(c, vec3(0.9, 0.3, 0.05), bwGlow * 0.6);
+                    bump -= vein * 1.2 * fD;
+                    c *= 0.9 + 0.2 * bwNoise(wp.xz * 22.0) * fF;
                 #else
                     // moon: regolith with dark maria, fine grain, little craters and stones
                     c = mix(c_grassDry, c_grassB, smoothstep(0.25, 0.75, big));
@@ -245,7 +289,7 @@ export function createGroundMaterial(theme, waterLevel, top) {
                         float face = smoothstep(0.65, 0.0, vr.x);
                         vec3 rock = mix(c_rockDark, c_rock, 0.22 + vr.z * 0.45 + strata * 0.18 + wallFine * 0.2);
                         rock *= (1.0 - crack * 0.5 * fD) * (0.88 + 0.22 * face) * mix(1.0, 0.9 + 0.2 * grain, bwFade(13.0));
-                    #if BW_THEME == 0
+                    #if BW_THEME == 0 || BW_THEME == 6
                         // moss on the ledges
                         float moss = smoothstep(0.55, 0.8, n.y + (wallFine - 0.5) * 0.5) * smoothstep(0.35, 0.6, bwNoise(wp.xz * 1.3 + wp.y));
                         rock = mix(rock, mix(c_grassA, c_grassDry, wallFine) * 0.8, moss * 0.85);
@@ -264,6 +308,11 @@ export function createGroundMaterial(theme, waterLevel, top) {
                     float beach = smoothstep(0.55 + mid * 0.3, 0.2, a);
                 #if BW_THEME == 3
                     beach *= 0.0;
+                #endif
+                #if BW_THEME == 5
+                    // no sand at the lava: the rock glows where it meets it
+                    beach *= 0.0;
+                    bwGlow = max(bwGlow, smoothstep(0.35, 0.0, a) * 0.85);
                 #endif
                     vec3 sand = c_sand * (0.93 + 0.08 * fine + 0.14 * (bwNoise(wp.xz * 14.0) - 0.5) * bwFade(14.0));
                     c = mix(c, sand, beach * (1.0 - rocky * 0.7));
@@ -294,6 +343,8 @@ export function createGroundMaterial(theme, waterLevel, top) {
                 float bwBump;
                 vec3 bwN = normalize(vBwNormal);
                 diffuseColor.rgb *= bwGround(vBwWorld, bwN, vBwInfo, bwBump);`)
+            .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+                totalEmissiveRadiance += vec3(1.6, 0.45, 0.06) * bwGlow;`)
             .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
                 {
                     // a fine bump from the patterns (like a bump map, from the screen derivatives)
@@ -305,7 +356,7 @@ export function createGroundMaterial(theme, waterLevel, top) {
                     normal = normalize(abs(det) * normal - grad);
                 }`);
     };
-    material.customProgramCacheKey = () => `bw-ground2-${theme}`;
+    material.customProgramCacheKey = () => `bw-ground3-${theme}`;
     return material;
 }
 

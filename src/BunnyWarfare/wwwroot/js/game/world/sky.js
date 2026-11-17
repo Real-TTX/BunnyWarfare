@@ -7,13 +7,19 @@ export const SKIES = {
     Snow: { top: '#5f92c8', horizon: '#dfe9f3', bottom: '#dfe9f3', sun: '#ffffff', glow: '#e9f2ff', fog: '#dfe9f3', clouds: true },
     Desert: { top: '#3f94d8', horizon: '#f7e1b8', bottom: '#f7e1b8', sun: '#fff0c0', glow: '#ffc773', fog: '#f7e1b8', clouds: true },
     Moon: { top: '#020208', horizon: '#0d0c1c', bottom: '#050510', sun: '#ffffff', glow: '#7a86b8', fog: '#07070f', clouds: false },
+    // a golden afternoon in the autumn wood
+    Autumn: { top: '#4f86c8', horizon: '#f6d7a8', bottom: '#f6d7a8', sun: '#ffe2a8', glow: '#ffb45a', fog: '#efd2a6', clouds: true, cloud: ['#f6d8c4', '#fff0e2', '#fff8f0'] },
+    // smoke and ash over the volcano: a dark red sky, a sun like an ember, heavy grey clouds
+    Volcano: { top: '#2a1418', horizon: '#a8482a', bottom: '#5a2418', sun: '#ffb070', glow: '#ff6a2a', fog: '#6a3024', clouds: true, cloud: ['#2a2224', '#4a3a38', '#6a5450'], cloudCount: 9 },
+    // hot and humid: a bright hazy sky over the jungle
+    Jungle: { top: '#3a9ad0', horizon: '#d8f0e2', bottom: '#d8f0e2', sun: '#fffbe0', glow: '#fff2b0', fog: '#cfe8d8', clouds: true, cloudCount: 8 },
 };
 
 export function skyOf(theme) {
     return SKIES[theme] ?? SKIES.Meadow;
 }
 
-function cloudGeometry(random) {
+function cloudGeometry(random, colours = ['#d9e3ee', '#f1f5fa', '#ffffff']) {
     const parts = [];
     const puffs = 5 + Math.floor(random() * 4);
     for (let i = 0; i < puffs; i++) {
@@ -21,7 +27,7 @@ function cloudGeometry(random) {
         const g = jitter(new THREE.IcosahedronGeometry(r, 1), 0.35, random);
         g.scale(1, 0.72, 1);
         g.translate((i - puffs / 2) * 1.9 + random(), random() * 0.9, (random() - 0.5) * 2.2);
-        parts.push(paint(g, (x, y, z, nx, ny) => (ny < -0.3 ? '#d9e3ee' : ny < 0.2 ? '#f1f5fa' : '#ffffff')));
+        parts.push(paint(g, (x, y, z, nx, ny) => (ny < -0.3 ? colours[0] : ny < 0.2 ? colours[1] : colours[2])));
     }
     return merge(parts);
 }
@@ -123,10 +129,10 @@ export class Sky {
 
         this.clouds = null;
         if (style.clouds) {
-            const geometries = [cloudGeometry(random), cloudGeometry(random), cloudGeometry(random)];
+            const geometries = [cloudGeometry(random, style.cloud), cloudGeometry(random, style.cloud), cloudGeometry(random, style.cloud)];
             const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true, transparent: true, opacity: 0.94, fog: true });
             this.cloudSets = [];
-            const perSet = theme === 'Snow' ? 7 : theme === 'Desert' ? 3 : 6;
+            const perSet = style.cloudCount ?? (theme === 'Snow' ? 7 : theme === 'Desert' ? 3 : 6);
             for (const geometry of geometries) {
                 const mesh = new THREE.InstancedMesh(geometry, material, perSet);
                 mesh.frustumCulled = false;

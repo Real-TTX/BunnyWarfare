@@ -128,7 +128,7 @@ export function copyText(text) {
     return Promise.resolve(ok);
 }
 
-export const THEME_NAMES = { Meadow: 'Möhrenwiese', Snow: 'Frostbau', Desert: 'Dünenland', Moon: 'Mondkrater' };
+export const THEME_NAMES = { Meadow: 'Möhrenwiese', Snow: 'Frostbau', Desert: 'Dünenland', Moon: 'Mondkrater', Autumn: 'Herbstwald', Volcano: 'Vulkaninsel', Jungle: 'Dschungel' };
 export const LEVEL_NAMES = { Easy: 'Leicht', Normal: 'Normal', Hard: 'Schwer' };
 export const themeName = theme => THEME_NAMES[theme] ?? theme;
 

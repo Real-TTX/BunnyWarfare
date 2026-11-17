@@ -2,7 +2,10 @@
 // away from the water, steep slopes and the start spots of the bunnies. Craters remove what stood in the blast and set the rest onto the new ground.
 import * as THREE from 'three';
 import * as M from './models.js';
+import * as B from './buildings.js';
 import { seeded, windify, noise2, fbm2 } from './util.js';
+import { findLandmarks, findVolcano, findPonds } from './landmarks.js';
+import { lavaMaterial, waterfallMaterial } from './water.js';
 
 const GRID = 4;
 const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
@@ -164,6 +167,9 @@ export class Vegetation {
         // flat things on the ground (footprints, crater floors): drawn just above it
         const decal = this.material(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
         this.mats = { solid, smooth, grass, plants, leaves, decal };
+        this.uniforms = uniforms;
+        this.chimneys = []; // where smoke rises (houses, the volcano): read by Life
+        this.caveRoofs = [];
 
         // how much land there is decides how much grows on it
         let land = 0;
@@ -178,12 +184,27 @@ export class Vegetation {
         const shore = p => p.a > -0.15 && p.a < 0.35 && p.slope < 0.5;
         const centres = (count, accept) => scatter.place(count, accept, { bunnyGap: 0 });
 
+        // the landmarks of the server (caves, the temple terrace) keep the decoration out; a house takes the best flat spot first
+        this.landmarks = findLandmarks(data);
+        for (const l of this.landmarks) {
+            const r = l.kind === 'cave' ? l.length / 2 + 0.6 : l.size / 2 + 0.8;
+            scatter.taken.push({ x: l.x, z: l.z, r });
+            this.clearings.push({ x: l.x, z: l.z, r: r - 0.4 });
+        }
+        if (theme === 'Volcano') this.volcanoTop(random);
+        this.house(scatter, random, theme);
+
         switch (theme) {
             case 'Snow': this.snow(scatter, random, n, dry, flat, shore, centres); break;
             case 'Desert': this.desert(scatter, random, n, dry, flat, shore, centres); break;
             case 'Moon': this.moon(scatter, random, n, dry, flat, centres); break;
+            case 'Autumn': this.autumn(scatter, random, n, dry, flat, shore, centres); break;
+            case 'Volcano': this.volcano(scatter, random, n, dry, flat, centres); break;
+            case 'Jungle': this.jungle(scatter, random, n, dry, flat, shore, centres); break;
             default: this.meadow(scatter, random, n, dry, flat, shore, centres); break;
         }
+        this.caves(random);
+        for (const l of this.landmarks) if (l.kind === 'temple') this.temple(scatter, random, l);
     }
 
     material(m) {
@@ -471,8 +492,257 @@ export class Vegetation {
         this.trails(random, 3, '#5a5a63', 26);
     }
 
+    // ---------------------------------------------------------------- houses, caves, the temple
+
+    /** One house per island (the type of the theme) on the flattest open spot; its chimney smokes. */
+    house(scatter, random, theme) {
+        const kinds = {
+            Meadow: ['farmhouse', B.farmhouse], Autumn: ['cottage', B.cottage], Snow: ['cabin', B.logCabin], Desert: ['adobe', B.adobe],
+            Moon: ['dome', B.moonDome], Volcano: ['hut', B.obsidianHut],
+        };
+        const kind = kinds[theme];
+        if (!kind) return;
+        const d = this.data;
+        // flat in a circle around (the size of the house): it must not hang over a slope
+        const reach = { hut: 1.1, dome: 1.4 }[kind[0]] ?? 1.6;
+        const level = p => {
+            if (p.a < 0.6 || p.slope > 0.3) return false;
+            for (let i = 0; i < 8; i++) {
+                const a = (i / 8) * Math.PI * 2;
+                const h = d.heightAt(p.x + Math.cos(a) * reach, p.z + Math.sin(a) * reach);
+                if (Math.abs(h - p.y) > 0.5 || h < d.waterLevel + 0.4) return false;
+            }
+            return true;
+        };
+        const spots = scatter.place(1, level, { big: reach + 0.8, bunnyGap: 3.0, tries: 3000 });
+        const items = spots.map(p => {
+            // the door looks towards the middle of the island, roughly
+            const rot = Math.atan2(d.width / 2 - p.x, d.width / 2 - p.z) + (random() - 0.5) * 0.8;
+            return { x: p.x, y: p.y - 0.12, z: p.z, rot, s: 1, r: 1.5, dy: -0.12 };
+        });
+        const layer = this.add(kind[1](), this.mats.solid, items, { name: 'house', clear: true });
+        if (layer && B.CHIMNEYS[kind[0]]) {
+            const it = items[0];
+            const local = B.CHIMNEYS[kind[0]].clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), it.rot);
+            this.chimneys.push({ x: it.x + local.x, y: it.y + local.y, z: it.z + local.z, item: it, size: 1 });
+        }
+        if (layer && theme === 'Autumn') {
+            // jack-o'-lanterns at the door
+            const it = items[0];
+            const lanterns = [-0.55, 0.85].map(side => {
+                const x = it.x + Math.sin(it.rot) * 1.25 + Math.cos(it.rot) * side, z = it.z + Math.cos(it.rot) * 1.25 - Math.sin(it.rot) * side;
+                return { x, y: d.heightAt(x, z) - 0.02, z, rot: it.rot + (random() - 0.5) * 0.6, s: 1, r: 0.25 };
+            });
+            const glow = this.material(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, emissive: 0xff7a1a, emissiveIntensity: 0.25 }));
+            this.add(B.jackOLantern(), glow, lanterns, { name: 'lanterns' });
+        }
+    }
+
+    /** The cave mouths: a rock frame at the mouth, a roof over the inner part, glowing things inside. */
+    caves(random) {
+        const caves = this.landmarks.filter(l => l.kind === 'cave');
+        if (caves.length === 0) return;
+        const theme = this.theme;
+        const items = caves.map(l => ({ x: l.mouthX, y: l.floor, z: l.mouthZ, rot: l.yaw, s: 1, r: 1.2 }));
+        this.add(B.caveFrame(theme, l0Width(caves)), this.mats.solid, items.map(it => ({ ...it })), { name: 'caveframe' });
+        this.roofMaterial = this.material(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true, transparent: true, opacity: 1 }));
+        const roofs = this.add(B.caveRoof(theme, l0Width(caves), Math.max(2.5, caves[0].length - 0.8)), this.roofMaterial, items.map(it => ({ ...it, r: 1.6 })), { name: 'caveroof' });
+        if (roofs) this.caveRoofs = caves;
+        const glow = this.material(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, emissive: theme === 'Volcano' ? 0xff5a10 : 0x3ad6ff, emissiveIntensity: 0.9 }));
+        this.add(B.caveGlow(theme), glow, items.map(it => ({ ...it, r: 0.3 })), { shadow: false, name: 'caveglow' });
+        function l0Width(list) {
+            return Math.max(2.2, list[0].width + 0.4);
+        }
+    }
+
+    /** The ruins around the temple terrace of the jungle: pillars at the rim, broken walls, the idol at the back, paving in the floor. */
+    temple(scatter, random, l) {
+        const d = this.data;
+        const half = l.size / 2;
+        const at = (lx, lz, extra = {}) => ({ x: l.x + lx, y: l.floor - 0.02, z: l.z + lz, rot: 0, s: 1, r: 0.4, ...extra });
+        const ok = it => !scatter.nearBunny(it.x, it.z, 1.0);
+        const pillars = [];
+        for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [-1, 0], [1, 0]]) pillars.push(at(px * (half - 0.4), pz * (half - 0.4), { rot: random() }));
+        this.add(B.templePillar(201), this.mats.solid, pillars.filter((_, i) => i % 2 === 0).filter(ok), { name: 'pillars' });
+        this.add(B.templePillar(202), this.mats.solid, pillars.filter((_, i) => i % 2 === 1).filter(ok), { name: 'pillars2' });
+        this.add(B.templeWall(203), this.mats.solid, [at(-half * 0.45, -half + 0.2), at(half + 0.0, half * 0.35, { rot: Math.PI / 2 })].filter(ok), { name: 'templewall' });
+        this.add(B.templeStatue(), this.mats.solid, [at(0, -half + 0.9)].filter(ok), { name: 'idol', clear: true });
+        const tiles = [];
+        for (let i = 0; i < 7; i++) tiles.push(at((random() - 0.5) * (l.size - 2.5), (random() - 0.5) * (l.size - 2.5), { rot: random() * Math.PI, s: 0.8 + random() * 0.3, y: l.floor + 0.01 }));
+        this.add(B.paving(204), this.mats.decal, tiles, { shadow: false, name: 'paving' });
+        // the jungle creeps back: ferns and big leaves at the rim of the terrace
+        const rim = [];
+        for (let i = 0; i < 22; i++) {
+            const a = random() * Math.PI * 2, r = half + 0.2 + random() * 1.0;
+            const x = l.x + Math.cos(a) * r, z = l.z + Math.sin(a) * r;
+            if (!d.inside(x, z) || scatter.nearBunny(x, z, 0.9)) continue;
+            rim.push({ x, y: d.heightAt(x, z) - 0.02, z, rot: random() * Math.PI * 2, s: 0.7 + random() * 0.5, r: 0.1 });
+        }
+        this.add(M.fern(205), this.mats.plants, rim, { shadow: false, name: 'templeferns' });
+    }
+
+    /** The caldera of the volcano: a pool of lava in it, and smoke above. */
+    volcanoTop() {
+        const v = findVolcano(this.data);
+        if (!v) return;
+        this.volcanoInfo = v;
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(v.radius, 28).rotateX(-Math.PI / 2), lavaMaterial(this.uniforms, true));
+        pool.position.set(v.x, v.surface, v.z);
+        pool.name = 'caldera';
+        this.pool = pool;
+        this.group.add(pool);
+        this.chimneys.push({ x: v.x, y: v.floor + 0.6, z: v.z, item: null, size: 3.2 });
+    }
+
+    /** The waterfall of the jungle: a ledge of rocks at the pond and the falling water in front of it. */
+    waterfall(scatter, random) {
+        const pond = findPonds(this.data);
+        if (!pond || pond.shore.length === 0) return;
+        const d = this.data;
+        // the shore point that lies highest around (rocks fit best there) and keeps away from the bunnies
+        let best = null, bestScore = -Infinity;
+        for (let i = 0; i < pond.shore.length; i += 2) {
+            const p = pond.shore[i];
+            if (scatter.nearBunny(p.x, p.z, 2.5)) continue;
+            const away = Math.atan2(p.x - pond.x, p.z - pond.z);
+            const behind = d.heightAt(p.x + Math.sin(away) * 1.5, p.z + Math.cos(away) * 1.5);
+            const score = behind - p.y + random() * 0.2;
+            if (score > bestScore) { bestScore = score; best = { ...p, away }; }
+        }
+        if (!best) return;
+        const rot = best.away + Math.PI; // the front of the ledge looks at the pond
+        const base = { x: best.x + Math.sin(best.away) * 0.7, z: best.z + Math.cos(best.away) * 0.7 };
+        const y = d.heightAt(base.x, base.z) - 0.1;
+        this.add(B.waterfallRocks(this.theme), this.mats.solid, [{ x: base.x, y, z: base.z, rot, s: 1, r: 1.3 }], { name: 'falls' });
+        scatter.taken.push({ x: base.x, z: base.z, r: 1.6 });
+        // the water: a ribbon from the top of the ledge down into the pond
+        const height = y + 2.0 - d.waterLevel;
+        const ribbon = new THREE.PlaneGeometry(0.9, height, 1, 12);
+        const p = ribbon.attributes.position;
+        for (let i = 0; i < p.count; i++) {
+            const t = (p.getY(i) + height / 2) / height; // 0 bottom, 1 top
+            p.setZ(i, 0.15 + Math.pow(1 - t, 1.6) * 0.75);
+        }
+        ribbon.translate(0, height / 2, 0);
+        const fall = new THREE.Mesh(ribbon, waterfallMaterial(this.uniforms));
+        fall.position.set(base.x, d.waterLevel, base.z);
+        fall.rotation.y = rot;
+        fall.name = 'waterfall';
+        this.falls = fall;
+        this.fallsBase = { x: base.x + Math.sin(rot) * 0.95, z: base.z + Math.cos(rot) * 0.95 };
+        this.group.add(fall);
+    }
+
+    // ---------------------------------------------------------------- the newer themes
+
+    autumn(scatter, random, n, dry, flat, shore, centres) {
+        const { solid, smooth, plants, leaves } = this.mats;
+        const palettes = [['#e8742a', '#f29a3a', '#d65a1e', '#f2b84a'], ['#c8321e', '#e0502a', '#a8281a', '#f07a3a'], ['#f2c43a', '#e8a82a', '#ffd95a', '#d6902a']];
+        const treeSpots = scatter.place(n(1 / 18), p => dry(p) && p.slope < 0.6, { big: 2.0, bunnyGap: 2.4 });
+        const groups = [[], [], [], []];
+        treeSpots.forEach(p => groups[random() < 0.15 ? 3 : Math.floor(random() * 3)].push(item(p, random, 0.8 + random() * 0.45, { r: 1.1, dy: -0.05 })));
+        palettes.forEach((pal, k) => this.add(B.autumnTree(300 + k, pal), leaves, groups[k], { name: 'autumntree' }));
+        this.add(M.pine(304, false), leaves, groups[3], { name: 'pine' });
+        // a carpet of leaves: under every tree and in drifts across the meadow
+        this.add(M.fallenLeaves(305), plants, treeSpots.map(p => item(p, random, 1.0 + random() * 0.5, { r: 0.1 })), { shadow: false, name: 'leaves' });
+        this.add(M.fallenLeaves(306), plants, scatter.place(n(1 / 9), p => p.a > 0.3 && p.slope < 0.6, { tries: 3, bunnyGap: 0.5 }).map(p => item(p, random, 0.8 + random() * 0.6, { r: 0.1 })), { shadow: false, name: 'leaves2' });
+        const bushes = scatter.place(n(1 / 22), dry, { big: 0.8 });
+        this.add(M.bush(307, ['#b8421e', '#d6602a', '#8a3a1a'], '#3a1a4a', '#f2a04a'), smooth, bushes.map(p => item(p, random, 0.8 + random() * 0.5, { r: 0.6, dy: -0.05 })), { name: 'bush' });
+        // pumpkin fields with a scarecrow
+        const fields = centres(Math.max(2, Math.round(this.area / 280)), flat);
+        const pumpkins = [];
+        fields.forEach(f => {
+            for (let i = 0; i < 16; i++) {
+                const a = random() * Math.PI * 2, r = Math.sqrt(random()) * 2.0;
+                const x = f.x + Math.cos(a) * r, z = f.z + Math.sin(a) * r;
+                if (!this.data.inside(x, z) || scatter.nearBunny(x, z, 0.9)) continue;
+                const y = this.data.heightAt(x, z);
+                if (y < this.data.waterLevel + 0.4 || this.data.slopeAt(x, z) > 0.55) continue;
+                pumpkins.push({ x, y: y - 0.03, z, rot: random() * Math.PI * 2, s: 0.8 + random() * 0.6, r: 0.25 });
+            }
+        });
+        this.add(B.pumpkin(308), smooth, pumpkins.filter((_, i) => i % 2 === 0), { name: 'pumpkins' });
+        this.add(B.pumpkin(309), smooth, pumpkins.filter((_, i) => i % 2 === 1), { name: 'pumpkins2' });
+        this.add(B.scarecrow(), solid, fields.slice(0, 2).filter(f => !scatter.nearBunny(f.x, f.z, 1.5)).map(f => item(f, random, 1, { r: 0.5, dy: -0.05 })), { name: 'scarecrow', clear: true });
+        this.add(M.fence(), solid, fields.slice(0, 2).map(f => {
+            const x = f.x - 2.4, z = f.z;
+            return { x, y: this.data.heightAt(x, z) - 0.03, z, rot: Math.PI / 2 + random() * 0.4, s: 1, r: 1, dy: -0.03 };
+        }).filter(it => it.y > this.data.waterLevel + 0.4), { name: 'fence' });
+        this.add(M.haystack(), solid, scatter.place(Math.max(2, Math.round(this.area / 400)), flat, { big: 1.2, bunnyGap: 2 }).map(p => item(p, random, 0.9 + random() * 0.4, { r: 0.7, dy: -0.05 })), { name: 'hay' });
+        this.add(B.toadstools(310), smooth, scatter.clusters(centres(Math.max(3, Math.round(this.area / 200)), dry), 3, 1.0, dry).map(p => item(p, random, 0.8 + random() * 0.6, { r: 0.15 })), { name: 'toadstools' });
+        this.add(M.stump(311), solid, scatter.place(Math.max(2, Math.round(this.area / 260)), p => dry(p) && p.slope < 0.45, { big: 0.6, bunnyGap: 1.6, tries: 80 }).map(p => item(p, random, 0.8 + random() * 0.5, { r: 0.35, dy: -0.04 })), { name: 'stump', clear: true });
+        this.add(M.log(312), solid, scatter.place(Math.max(2, Math.round(this.area / 380)), p => dry(p) && p.slope < 0.38, { big: 1.1, bunnyGap: 2, tries: 120 }).map(p => item(p, random, 0.9 + random() * 0.3, { r: 0.9, dy: -0.06 })), { name: 'log', clear: true });
+        this.add(M.rock(313, ['#8f857a', '#5a5048'], true), solid, scatter.place(n(1 / 50), p => p.a > -0.3, { big: 0.6 }).map(p => item(p, random, 0.6 + random() * 1.1, { r: 0.5, dy: -0.12 })), { name: 'rock' });
+        this.cliffRocks(scatter, random, n, M.cliffRock(314, ['#8f857a', '#5a5048'], { moss: '#b8742a' }));
+        this.add(M.pebbles(315, ['#8f857a', '#6f665c', '#a89a86']), solid, scatter.place(n(1 / 26), p => p.a > -0.2 && p.slope < 0.8, { tries: 3, bunnyGap: 0.5 }).map(p => item(p, random, 0.8 + random() * 0.6, { r: 0.2, dy: -0.01 })), { shadow: false, name: 'pebbles' });
+        const reedSpots = scatter.clusters(centres(Math.max(2, Math.round(this.area / 200)), shore), 6, 1.4, shore);
+        this.add(M.reeds(316), plants, reedSpots.map(p => item(p, random, 0.8 + random() * 0.5, { r: 0.2, wet: true, dy: -0.05 })), { shadow: false, name: 'reeds' });
+        this.lilies(scatter, random);
+        this.grassLayers(scatter, random, n, p => p.a > 0.35 && p.slope < 0.78, [
+            ['#5a5a1e', '#9a8a3a', '#e0c870', 0.4],
+            ['#6a4a1e', '#b8863a', '#f0c060', 0.36],
+            ['#4a6a20', '#8aa83a', '#d6d07a', 0.42],
+        ], 12);
+    }
+
+    volcano(scatter, random, n, dry, flat, centres) {
+        const { solid, smooth, plants } = this.mats;
+        const glow = this.material(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, emissive: 0xff4a10, emissiveIntensity: 0.5 }));
+        const glass = this.material(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15, metalness: 0.35, flatShading: true }));
+        this.add(B.charredTree(320), solid, scatter.place(n(1 / 45), p => dry(p) && p.slope < 0.6, { big: 1.2, bunnyGap: 2.2 }).map(p => item(p, random, 0.8 + random() * 0.5, { r: 0.5, dy: -0.05 })), { name: 'charred' });
+        this.add(B.basalt(321), solid, scatter.place(n(1 / 70), p => p.a > 0.2 && p.slope < 0.9, { big: 1.0, bunnyGap: 1.8, tries: 30 }).map(p => item(p, random, 0.7 + random() * 0.7, { r: 0.6, dy: -0.1 })), { name: 'basalt' });
+        this.add(B.obsidian(322), glass, scatter.place(n(1 / 40), p => p.a > -0.2, { big: 0.6 }).map(p => item(p, random, 0.4 + random() * 1.0, { r: 0.4, dy: -0.08, tx: (random() - 0.5) * 0.4 })), { name: 'obsidian' });
+        this.add(M.rock(323, ['#3a3540', '#1e1b24']), solid, scatter.place(n(1 / 35), p => p.a > -0.3, { big: 0.6 }).map(p => item(p, random, 0.5 + random() * 1.3, { r: 0.5, dy: -0.12 })), { name: 'rock' });
+        this.cliffRocks(scatter, random, n, M.cliffRock(324, ['#3a3540', '#16131a']));
+        this.add(M.pebbles(325, ['#2a2630', '#3a3540', '#5a3a2a']), solid, scatter.place(n(1 / 14), p => p.a > -0.2 && p.slope < 0.9, { tries: 3, bunnyGap: 0.5 }).map(p => item(p, random, 0.8 + random() * 0.7, { r: 0.2, dy: -0.01 })), { shadow: false, name: 'pebbles' });
+        this.add(M.bones(), smooth, scatter.place(Math.max(1, Math.round(this.area / 400)), flat, { big: 0.5 }).map(p => item(p, random, 0.9 + random() * 0.4, { r: 0.3 })), { name: 'bones' });
+        this.add(M.cattleSkull(), smooth, scatter.place(Math.max(1, Math.round(this.area / 500)), flat, { big: 0.5, bunnyGap: 1.6, tries: 80 }).map(p => item(p, random, 0.9, { r: 0.3, dy: -0.03 })), { name: 'skulls', clear: true });
+        // hardy grey grass in the ash and the odd fire flower
+        this.add(M.dryBush(326), plants, scatter.place(n(1 / 24), dry, { bunnyGap: 0.8 }).map(p => item(p, random, 0.4 + random() * 0.4, { r: 0.3, tint: '#7a6a5a' })), { shadow: false, name: 'drybush' });
+        const fire = scatter.clusters(centres(Math.max(3, Math.round(this.area / 220)), dry), 5, 1.2, dry);
+        this.add(M.flower('#ff5a1a', '#ffd23a', 5), glow, fire.map(p => item(p, random, 0.6 + random() * 0.5, { r: 0.05 })), { shadow: false, name: 'fireflowers' });
+        this.trails(random, 2, '#121016', 18);
+        this.grassLayers(scatter, random, n, p => p.a > 0.4 && p.slope < 0.5, [
+            ['#3a3430', '#6a5e52', '#a89a86', 0.3],
+        ], 2);
+    }
+
+    jungle(scatter, random, n, dry, flat, shore, centres) {
+        const { solid, smooth, plants, leaves } = this.mats;
+        this.waterfall(scatter, random);
+        const trees = scatter.place(n(1 / 14), p => dry(p) && p.slope < 0.7, { big: 1.9, bunnyGap: 2.4 });
+        const tall = [[], []], palms = [];
+        trees.forEach(p => {
+            const it = item(p, random, 0.8 + random() * 0.4, { r: 1.2, dy: -0.05 });
+            if (random() < 0.3) palms.push(it); else tall[random() < 0.5 ? 0 : 1].push(it);
+        });
+        tall.forEach((items, k) => this.add(B.jungleTree(330 + k), leaves, items, { name: 'jungletree' }));
+        this.add(M.palm(332), leaves, palms, { name: 'palm' });
+        this.add(B.bamboo(333), plants, scatter.place(n(1 / 70), p => dry(p) && p.slope < 0.5, { big: 0.9, bunnyGap: 1.8 }).map(p => item(p, random, 0.8 + random() * 0.4, { r: 0.5 })), { name: 'bamboo' });
+        this.add(B.bigLeaf(334), plants, scatter.place(n(1 / 10), p => dry(p) && p.slope < 0.8, { bunnyGap: 0.9 }).map(p => item(p, random, 0.8 + random() * 0.7, { r: 0.4, dy: -0.03 })), { shadow: false, name: 'bigleaf' });
+        this.add(M.fern(335), plants, scatter.place(n(1 / 9), p => p.a > 0.3 && p.slope < 0.85, { tries: 3, bunnyGap: 0.7 }).map(p => item(p, random, 0.8 + random() * 0.6, { r: 0.1, dy: -0.02 })), { shadow: false, name: 'ferns' });
+        this.add(M.bush(336, ['#2f7f2a', '#3a8f30', '#1f6a24'], '#f25a7a', '#7fd05a'), smooth, scatter.place(n(1 / 18), dry, { big: 0.7 }).map(p => item(p, random, 0.8 + random() * 0.6, { r: 0.6, dy: -0.05 })), { name: 'bush' });
+        const tropical = [['#ff3a6a', '#ffd23a'], ['#ff8a1a', '#7a1a1a'], ['#b04aff', '#ffffff'], ['#ffd23a', '#e0501a']];
+        tropical.forEach(([petal, centre], k) => {
+            const spots = scatter.clusters(centres(Math.max(2, Math.round(this.area / 220)), dry), 8, 1.3, dry);
+            this.add(M.flower(petal, centre, 5 + k), plants, spots.map(p => item(p, random, 0.9 + random() * 0.7, { r: 0.05 })), { shadow: false, name: 'flowers' });
+        });
+        this.add(M.mushroom('#e0602a'), smooth, scatter.clusters(centres(3, dry), 5, 0.7, dry).map(p => item(p, random, 0.7 + random() * 0.8, { r: 0.08 })), { name: 'mushrooms' });
+        this.add(M.rock(337, ['#7d8a72', '#48523f'], true), solid, scatter.place(n(1 / 45), p => p.a > -0.3, { big: 0.6 }).map(p => item(p, random, 0.6 + random() * 1.2, { r: 0.5, dy: -0.12 })), { name: 'rock' });
+        this.cliffRocks(scatter, random, n, M.cliffRock(338, ['#7d8a72', '#48523f'], { moss: '#3f8a2c' }), 1 / 34);
+        this.add(M.log(339), solid, scatter.place(Math.max(2, Math.round(this.area / 350)), p => dry(p) && p.slope < 0.38, { big: 1.1, bunnyGap: 2, tries: 120 }).map(p => item(p, random, 0.9 + random() * 0.3, { r: 0.9, dy: -0.06 })), { name: 'log', clear: true });
+        const reedSpots = scatter.clusters(centres(Math.max(3, Math.round(this.area / 160)), shore), 7, 1.4, shore);
+        this.add(M.reeds(340), plants, reedSpots.map(p => item(p, random, 0.9 + random() * 0.5, { r: 0.2, wet: true, dy: -0.05 })), { shadow: false, name: 'reeds' });
+        this.lilies(scatter, random);
+        this.grassLayers(scatter, random, n, p => p.a > 0.3 && p.slope < 0.85, [
+            ['#1f5a1c', '#3f9a32', '#9ad85a', 0.5],
+            ['#2a6a22', '#4fae3a', '#b8e86a', 0.56],
+        ], 13);
+    }
+
     crater(x, z, radius) {
         for (const layer of this.layers) layer.crater(x, z, radius, this.data);
+        if (this.falls && Math.hypot(this.falls.position.x - x, this.falls.position.z - z) < radius + 1) this.falls.visible = false;
         if (this.sails) {
             const it = this.sailsOf;
             if (it.gone) this.sails.visible = false;
@@ -481,12 +751,33 @@ export class Vegetation {
     }
 
     /** What moves: the sails of the windmill (faster with more wind). */
-    update(dt, wind) {
+    update(dt, wind, bunnies) {
         if (this.sails?.visible) this.sails.rotation.z -= dt * (0.5 + Math.min(2.5, wind.length() * 0.5));
+        // the roof of a cave fades while a bunny is inside (so it can still be seen and aimed with)
+        if (this.roofMaterial && this.caveRoofs.length) {
+            let inside = false;
+            if (bunnies) {
+                for (const b of bunnies) {
+                    if (b.alive === false) continue;
+                    for (const l of this.caveRoofs) {
+                        const dx = b.position.x - l.x, dz = b.position.z - l.z;
+                        if (Math.abs(dx * l.ax + dz * l.az) < l.length / 2 + 0.4 && Math.abs(dx * l.az - dz * l.ax) < l.width / 2 + 0.6) inside = true;
+                    }
+                }
+            }
+            const goal = inside ? 0.25 : 1;
+            const m = this.roofMaterial;
+            m.opacity += (goal - m.opacity) * (1 - Math.exp(-dt * 6));
+            m.depthWrite = m.opacity > 0.95;
+        }
     }
 
     dispose() {
         this.sails?.geometry.dispose();
+        this.pool?.geometry.dispose();
+        this.pool?.material.dispose();
+        this.falls?.geometry.dispose();
+        this.falls?.material.dispose();
         for (const layer of this.layers) layer.dispose();
         for (const m of this.materials) m.dispose();
     }

@@ -3,7 +3,9 @@
 // a label with name and health, the marker of the turn, the gravestone and the little ghost of a knocked-out bunny.
 //
 // Public API (used by world.js, main.js, playback.js, match.js and the menu):
-//   new Bunny(dto, team)            dto = BunnyDto ({ id, team, name, x, y, z, yaw, health, maxHealth }), team = TeamDto ({ color })
+//   new Bunny(dto, team)            dto = BunnyDto ({ id, team, name, x, y, z, yaw, health, maxHealth }), team = TeamDto ({ color, fur, outfit, face })
+//                                   fur / outfit / face are keys of Business/Cosmetics.cs (fx/furs.js, fx/outfits.js); missing: a classic fur by id, the helmet
+//   setLook({ fur, outfit, face, color })   dresses the bunny anew (the wardrobe preview, portraits); .look is what it wears
 //   .root .position .goal .yaw .goalYaw .moving .alive .grave .color .id .team .name
 //   setHealth(health)               the label's bar animates to it (low health shows plasters)
 //   snap(x, y, z, yaw?)             puts the bunny there at once
@@ -28,19 +30,11 @@
 import * as THREE from 'three';
 import { paint, merge, sphere, fluffySphere, limb, softRing } from './fx/shapes.js';
 import { weaponModel, snackModel, gravestoneModel, ghostModel } from './fx/props.js';
+import { furOf, CLASSIC_FURS, dressFur, tickFurs } from './fx/furs.js';
+import { outfitParts, faceParts, laserPupilMaterial, laserBeamMaterial, laserGeometry } from './fx/outfits.js';
 import { activeParticles } from './effects.js';
 
 // ---------------------------------------------------------------- looks
-
-/** Fur colours: every bunny gets one (by its id), the team shows on the helmet and the scarf. */
-const FURS = [
-    { fur: '#f4efe7', shade: '#d8cdbf', belly: '#fffaf3', inner: '#f5a9b8', brow: '#7a6656' }, // snow white
-    { fur: '#d9a46c', shade: '#b07a46', belly: '#f8e6cc', inner: '#f2a0a8', brow: '#5a3518' }, // caramel
-    { fur: '#b3aca6', shade: '#8a827c', belly: '#ebe6e1', inner: '#eea2b1', brow: '#46403b' }, // grey
-    { fur: '#efdfc0', shade: '#cdb48a', belly: '#fffaf0', inner: '#f5aab4', brow: '#6f5532' }, // cream
-    { fur: '#9a7253', shade: '#6f4f37', belly: '#e2cbb0', inner: '#e79aa4', brow: '#3a2516' }, // brown
-    { fur: '#6b6460', shade: '#4a4441', belly: '#b9b1aa', inner: '#e3909e', brow: '#231d1a' }, // dark
-];
 
 const C = { nose: '#ff6f8e', teeth: '#ffffff', whisker: '#3b302a', blush: '#ff8fa6', pad: '#f6a7b5', pack: '#7b6a3c', packDark: '#544826', strap: '#3e4826' };
 
@@ -57,7 +51,7 @@ function cached(key, make) {
 
 /** Body: a round little body with a belly, haunches, big floppy feet with pink beans, the cotton tail and a backpack with a carrot. Origin at the feet. */
 function bodyGeometry(f) {
-    return cached(`body-${f.fur}`, () => {
+    return cached(`body-${f.key}`, () => {
         const parts = [];
         const r = 0.27;
         const body = fluffySphere(r, 0.08, 1.7, 24, 18);
@@ -134,7 +128,7 @@ function bodyGeometry(f) {
 
 /** Head (origin at its centre): a big fluffy head, puffy cheeks, the muzzle, two huge buck teeth, whiskers, blush and the chin strap. */
 function headGeometry(f) {
-    return cached(`head-${f.fur}`, () => {
+    return cached(`head-${f.key}`, () => {
         const parts = [];
         const head = fluffySphere(HEAD_R, 0.045, 2.3, 26, 18);
         head.scale(1.08, 0.95, 0.98);
@@ -170,12 +164,6 @@ function headGeometry(f) {
             paint(tooth, (x, y) => (y < -0.215 ? '#f1ece2' : C.teeth));
             parts.push(tooth);
         }
-        // the chin strap of the helmet
-        const strap = new THREE.TorusGeometry(HEAD_R * 1.04, 0.012, 4, 24, Math.PI);
-        strap.rotateZ(Math.PI);
-        strap.translate(0, 0.07, 0.02);
-        paint(strap, C.strap);
-        parts.push(strap);
         return merge(parts);
     });
 }
@@ -247,7 +235,7 @@ function noseGeometry() {
 
 /** An ear segment: the outer fur and the pink inside; origin at its base. */
 function earGeometry(f, tip) {
-    return cached(`ear-${f.fur}-${tip}`, () => {
+    return cached(`ear-${f.key}-${tip}`, () => {
         const len = tip ? 0.2 : 0.23;
         const r = tip ? 0.066 : 0.072;
         const outer = limb(r, len, 10);
@@ -263,7 +251,7 @@ function earGeometry(f, tip) {
 
 /** A short stubby arm hanging down from the shoulder, with a big round paw. */
 function armGeometry(f) {
-    return cached(`arm-${f.fur}`, () => {
+    return cached(`arm-${f.key}`, () => {
         const arm = limb(0.05, 0.09, 8);
         arm.rotateX(Math.PI);
         paint(arm, f.fur);
@@ -275,53 +263,14 @@ function armGeometry(f) {
     });
 }
 
-/** The army helmet, a size too big (tinted by the team colour; the vertex colours make the band darker), with a camouflage sprig. */
-function helmetGeometry() {
-    return cached('helmet', () => {
-        const dome = new THREE.SphereGeometry(0.345, 24, 10, 0, Math.PI * 2, 0, Math.PI * 0.47);
-        dome.scale(1.02, 0.8, 1.04);
-        paint(dome, (x, y) => (y < 0.035 ? '#8a8a8a' : '#ffffff'));
-        const brim = new THREE.CylinderGeometry(0.37, 0.38, 0.035, 26);
-        brim.scale(1, 1, 1.08);
-        paint(brim, '#c4c4c4');
-        const band = new THREE.TorusGeometry(0.342, 0.02, 5, 28);
-        band.rotateX(Math.PI / 2);
-        band.scale(1.02, 1, 1.05);
-        band.translate(0, 0.045, 0);
-        paint(band, '#b0b0b0');
-        const rivet = sphere(0.02, 6, 4);
-        rivet.translate(0, 0.08, 0.355);
-        paint(rivet, '#d9d9d9');
-        return merge([dome, brim, band, rivet]);
-    });
-}
-
-function sprigGeometry() {
-    return cached('sprig', () => {
-        const parts = [];
-        for (let i = 0; i < 3; i++) {
-            const leaf = sphere(0.05, 7, 5);
-            leaf.scale(0.45, 1.6, 0.18);
-            leaf.translate(0, 0.08, 0);
-            leaf.rotateZ(-0.5 + i * 0.45);
-            leaf.translate(-0.22, 0.14, -0.14);
-            paint(leaf, i === 1 ? '#86c84a' : '#4f9e2f');
-            parts.push(leaf);
-        }
-        // a little flower stuck in the band
-        for (let p = 0; p < 5; p++) {
-            const a = (p / 5) * Math.PI * 2;
-            const petal = sphere(0.022, 6, 4);
-            petal.scale(1, 1, 0.4);
-            petal.translate(0.24 + Math.cos(a) * 0.026, 0.1 + Math.sin(a) * 0.026, 0.25);
-            paint(petal, '#ffffff');
-            parts.push(petal);
-        }
-        const heart = sphere(0.016, 6, 4);
-        heart.translate(0.24, 0.1, 0.258);
-        paint(heart, '#ffd23a');
-        parts.push(heart);
-        return merge(parts);
+/** The chin strap of helmets (head space). */
+function chinStrapGeometry() {
+    return cached('chinstrap', () => {
+        const strap = new THREE.TorusGeometry(HEAD_R * 1.04, 0.012, 4, 24, Math.PI);
+        strap.rotateZ(Math.PI);
+        strap.translate(0, 0.07, 0.02);
+        paint(strap, C.strap);
+        return merge([strap]);
     });
 }
 
@@ -529,7 +478,9 @@ export class Bunny {
         this.goalYaw = this.yaw;
         this.moving = 0; // seconds the walking still lasts (main.js and walkTo set it)
         this.clock = Math.random() * 10;
-        this.fur = FURS[Math.abs((dto.id ?? 0) * 7 + (dto.team ?? 0) * 3) % FURS.length];
+        this.classicFur = CLASSIC_FURS[Math.abs((dto.id ?? 0) * 7 + (dto.team ?? 0) * 3) % CLASSIC_FURS.length];
+        this.look = { fur: team?.fur || this.classicFur, outfit: team?.outfit || 'helmet', face: team?.face || 'none' };
+        this.fur = furOf(this.look.fur);
         this.flopEar = ((dto.id ?? 0) % 3) !== 1; // most bunnies have one cheeky bent ear
 
         this.anim = 'idle';
@@ -579,11 +530,7 @@ export class Bunny {
         this.spinner = new THREE.Group(); // tumbles around the middle of the body
         this.spinner.position.y = 0.5;
         this.root.add(this.spinner);
-        this.model = new THREE.Group();
-        this.model.position.y = -0.5;
-        this.model.rotation.order = 'YXZ';
-        this.spinner.add(this.model);
-        this.buildModel();
+        this.createModel();
 
         this.label = new Label(this.name, this.color);
         this.label.sprite.position.y = 1.92;
@@ -597,9 +544,36 @@ export class Bunny {
         if (!this.alive) this.die(false);
     }
 
+    createModel() {
+        this.model = new THREE.Group();
+        this.model.position.y = -0.5;
+        this.model.rotation.order = 'YXZ';
+        this.spinner.add(this.model);
+        this.buildModel();
+    }
+
+    /** Dresses the bunny anew: { fur, outfit, face } keys (missing ones stay), color = a new team colour. */
+    setLook(look = {}) {
+        if (look.color) this.color = look.color;
+        this.look = {
+            fur: look.fur || this.look.fur,
+            outfit: look.outfit || this.look.outfit,
+            face: look.face || this.look.face,
+        };
+        this.fur = furOf(this.look.fur);
+        const old = this.model;
+        this.spinner.remove(old);
+        this.furMaterial.dispose();
+        this.weapon = null;
+        this.createModel();
+        this.model.visible = old.visible;
+        this.updatePlasters();
+        this.sync();
+    }
+
     buildModel() {
         const f = this.fur;
-        this.furMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, emissive: 0x000000 });
+        this.furMaterial = dressFur(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, emissive: 0x000000 }), f);
         const team = teamMaterial(this.color);
         this.body = part(bodyGeometry(f), this.furMaterial, this.model);
         this.body.receiveShadow = true;
@@ -621,7 +595,15 @@ export class Bunny {
         this.eyes.position.y = EYE_Y;
         this.head.add(this.eyes);
         part(eyeballsGeometry(), eyeMaterial, this.eyes, 0, 0, 0, false);
-        this.pupils = [-1, 1].map(s => part(pupilGeometry(), eyeMaterial, this.eyes, s * EYE_X, 0, EYE_Z + 0.052, false));
+        const face = faceParts(this.look.face, this.color);
+        this.pupils = [-1, 1].map(s => part(pupilGeometry(), face.lasers ? laserPupilMaterial : eyeMaterial, this.eyes, s * EYE_X, 0, EYE_Z + 0.052, false));
+        // laser eyes: two beams out of the pupils (aiming and cheering)
+        this.beams = face.lasers ? this.pupils.map(pupil => {
+            const beam = part(laserGeometry, laserBeamMaterial, pupil, 0, 0, 0.01, false);
+            beam.visible = false;
+            return beam;
+        }) : null;
+        for (const piece of face.parts) part(piece.geometry, piece.material, this.head, 0, 0, 0, false);
         this.brows = [-1, 1].map(s => {
             const brow = part(browGeometry(f), plainMaterial, this.head, s * EYE_X, BROW_Y, 0.3, false);
             brow.userData.side = s;
@@ -635,8 +617,8 @@ export class Bunny {
         this.helmet.position.set(0, 0.23, -0.05);
         this.helmet.rotation.order = 'ZXY';
         this.head.add(this.helmet);
-        part(helmetGeometry(), team, this.helmet);
-        part(sprigGeometry(), plainMaterial, this.helmet, 0, 0, 0, false);
+        for (const piece of outfitParts(this.look.outfit, this.color)) part(piece.geometry, piece.material, this.helmet, 0, 0, 0, piece.shadow !== false);
+        if (this.look.outfit === 'helmet' || this.look.outfit === 'viking') part(chinStrapGeometry(), plainMaterial, this.head, 0, 0, 0, false);
 
         // the ears: a base and a tip each, the tips are springs
         this.earNodes = [-1, 1].map(s => {
@@ -908,6 +890,7 @@ export class Bunny {
     update(dt, time) {
         dt = Math.min(dt, 0.1);
         this.clock += dt;
+        tickFurs(performance.now() / 1000);
         const wasMoving = this.position.distanceToSquared(this.goal) > 1e-6;
         if (wasMoving) {
             this.position.lerp(this.goal, 1 - Math.exp(-dt * 12));
@@ -1462,6 +1445,16 @@ export class Bunny {
         this.helmet.position.y = hy;
         this.helmet.rotation.x = hrx;
         this.helmet.rotation.z = hrz;
+
+        // laser eyes fire while aiming, cheering and dancing (flickering)
+        if (this.beams) {
+            const on = this.clock < this.aimUntil || this.weaponHeld || this.anim === 'cheer' || this.anim === 'dance';
+            const len = 1.6 + Math.sin(this.clock * 40) * 0.25;
+            for (const beam of this.beams) {
+                beam.visible = on;
+                beam.scale.set(1 + Math.sin(this.clock * 55) * 0.3, 1 + Math.sin(this.clock * 55) * 0.3, len);
+            }
+        }
 
         // dizzy stars
         const dizzy = this.dizzy > 0 || this.once?.name === 'hurt';

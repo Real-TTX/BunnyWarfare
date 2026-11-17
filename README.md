@@ -7,6 +7,7 @@ Allein gegen Bots oder mit Freunden über das Netz – mit einer Administration 
 
 - **Spiel für Spieler: komplett 3D** – Hauptmenü, Anmeldung, Online-Lobbys, Neues Spiel, Rangliste, Profil und das Spiel selbst laufen in einer Vollbild-App über einer lebenden Insel (three.js, Cartoon-Look). Der Server rechnet jeden Schuss (keine Schummelei im Browser), Echtzeit über SignalR.
 - **Welten mit Details:** natürliche Küsten mit Stränden und Klippen, animiertes Wasser mit Schaum, Gras im Wind, Bäume, Karottenbeete, Tiere, Wolken – kein sichtbarer Kartenrand; Deko wird von Explosionen zerstört.
+- **Profil, Level und Kleiderschrank:** Jedes fertige Spiel bringt XP (mehr für Siege, K.O. und Schaden; wer sofort aufgibt, bekommt nichts), bis Level 30. Mit Leveln, Siegen und K.O. werden Felle (bis Tiger, Galaxie, Gold, Regenbogen), Hüte (vom Stahlhelm bis Krone und Punk-Irokese), Gesichter und Porträtrahmen frei – teils richtig wild 🔥. Die Porträts zeigen den eigenen Hasen in Menü, Lobby, Rangliste und Spiel.
 - **Multiplayer:** Lobby mit Einladungslink, 2–8 Teams, Bots in drei Stärken, Zuschauen, Chat, Rangliste.
 - **Waffen:** Karottenwerfer (Wind), Rübengranate (springt, Zünder), Kohlkopf-Splitter (Bomblets), Löwenzahn-Flinte (Schrot), Möhrenregen (Luftschlag) – alle in der Administration änderbar.
 - **Welten:** Möhrenwiese, Frostbau, Dünenland, Mondkrater (wenig Schwerkraft) – aus einem Seed erzeugt, mit Vorschau in der Administration.

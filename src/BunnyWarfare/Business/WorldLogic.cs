@@ -20,6 +20,9 @@ public static class WorldLogic
         WorldTheme.Snow => "Frostbau",
         WorldTheme.Desert => "Dünenland",
         WorldTheme.Moon => "Mondkrater",
+        WorldTheme.Autumn => "Herbstwald",
+        WorldTheme.Volcano => "Vulkaninsel",
+        WorldTheme.Jungle => "Dschungel",
         _ => theme.ToString(),
     };
 

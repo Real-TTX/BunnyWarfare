@@ -25,7 +25,7 @@ public sealed class IndexModel(AppDbContext db) : AppPageModel(db)
                 new FilterField("role", "Rolle", [new FilterOption("admin", "Administrator"), new FilterOption("player", "Spieler")], request.Filter("role")),
                 new FilterField("status", "Status", [new FilterOption("active", "Aktiv"), new FilterOption("disabled", "Gesperrt")], request.Filter("status")),
             ],
-            SortOptions = [new SortOption("name", "Name"), new SortOption("login", "Letzte Anmeldung"), new SortOption("games", "Spiele"), new SortOption("wins", "Siege")],
+            SortOptions = [new SortOption("name", "Name"), new SortOption("login", "Letzte Anmeldung"), new SortOption("games", "Spiele"), new SortOption("wins", "Siege"), new SortOption("level", "Level")],
             Sort = request.Sort, Descending = request.Descending, DefaultSort = "name",
             Total = result.Total, Matching = result.Matching, Noun = "Spieler", NounOne = "Spieler",
         };

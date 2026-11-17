@@ -142,7 +142,8 @@ public sealed class Terrain
     /// ridged peaks in the snow, wind-blown dunes in the desert, impact craters on the moon. The outer cells of the map are always deep
     /// under the water, so the island never touches the border. The same parameters always give the same island.
     /// </summary>
-    public static Terrain Generate(int size, int seed, double hillHeight, double roughness, double waterLevel, Data.WorldTheme theme = Data.WorldTheme.Meadow)
+    public static Terrain Generate(int size, int seed, double hillHeight, double roughness, double waterLevel, Data.WorldTheme theme = Data.WorldTheme.Meadow,
+        List<Landmark>? landmarks = null)
     {
         var heights = new float[size * size];
         var rough = Math.Clamp(roughness, 0, 1);
@@ -154,6 +155,9 @@ public sealed class Terrain
         var craters = Enumerable.Range(0, theme == Data.WorldTheme.Moon ? 5 + random.Next(4) : 0)
             .Select(_ => (X: center + (random.NextDouble() - 0.5) * size * 0.7, Z: center + (random.NextDouble() - 0.5) * size * 0.7, R: size * (0.04 + random.NextDouble() * 0.07)))
             .ToList();
+        // the volcano: a cone with a caldera near the middle of the island
+        var vent = (X: center + (random.NextDouble() - 0.5) * size * 0.12, Z: center + (random.NextDouble() - 0.5) * size * 0.12, R: size * 0.27);
+        pond.R *= theme switch { Data.WorldTheme.Autumn => 0.8, Data.WorldTheme.Jungle => 1.3, _ => 1.0 };
 
         for (var iz = 0; iz < size; iz++)
         {
@@ -201,16 +205,42 @@ public sealed class Terrain
 
                         // dunes across the wind, on a gentle swell
                         Data.WorldTheme.Desert => 0.55 * n + 0.45 * (0.5 + 0.5 * Math.Sin((ix * Math.Cos(duneAngle) + iz * Math.Sin(duneAngle)) / 4.2 + 5 * n)),
+
+                        // big round hills
+                        Data.WorldTheme.Autumn => 0.6 * n + 0.4 * Fbm(seed + 81, ix / (size / 2.6), iz / (size / 2.6), 2, 0.5),
+
+                        // steep jungle hills with deep valleys
+                        Data.WorldTheme.Jungle => 0.62 * n + 0.38 * Ridged(seed + 43, ix / (size / 2.4), iz / (size / 2.4)),
+
+                        // rough lava fields around the cone
+                        Data.WorldTheme.Volcano => 0.7 * n + 0.3 * Ridged(seed + 47, ix / (size / 4.0), iz / (size / 4.0)),
                         _ => n,
                     };
                     var hills = hillHeight * Math.Pow(Math.Max(0, relief * 1.3 - 0.2), 1.25) * inland;
 
                     // the shore: a beach that rises gently, or (where the noise says so) a cliff
-                    var cliff = SmoothStep(0.58, 0.72, ValueNoise(seed + 53, ix / 14.0, iz / 14.0)) * (theme == Data.WorldTheme.Desert ? 0.4 : 1);
+                    var cliffBias = theme switch { Data.WorldTheme.Volcano => -0.1, Data.WorldTheme.Jungle => -0.05, _ => 0.0 };
+                    var cliff = SmoothStep(0.58 + cliffBias, 0.72 + cliffBias, ValueNoise(seed + 53, ix / 14.0, iz / 14.0)) * (theme == Data.WorldTheme.Desert ? 0.4 : 1);
                     var beach = 0.15 + 0.9 * SmoothStep(0, 0.16, shape);
                     var rim = 0.15 + Math.Min(1, shape / 0.04) * (1.8 + hillHeight * 0.18);
                     var shore = beach * (1 - cliff) + rim * cliff;
                     h = waterLevel + shore + hills;
+
+                    // the cone of the volcano, with a caldera at its top
+                    if (theme == Data.WorldTheme.Volcano)
+                    {
+                        var dv = Math.Sqrt((ix - vent.X) * (ix - vent.X) + (iz - vent.Z) * (iz - vent.Z)) / vent.R;
+                        if (dv < 1)
+                        {
+                            var coneHeight = hillHeight * 0.9 + 5;
+                            const double caldera = 0.22;
+                            var q = dv / caldera;
+                            // the caldera: a bowl with a wide flat floor (for the lava pool) and steep walls
+                            var cone = dv >= caldera ? coneHeight * Math.Pow(1 - dv, 1.6) : coneHeight * Math.Pow(1 - caldera, 1.6) - 2.6 * (1 - q * q * q * q);
+                            // the cone is smooth near its top (no hills on it), so the caldera is a clean bowl
+                            h += cone * inland - hills * (1 - SmoothStep(0.12, 0.6, dv));
+                        }
+                    }
 
                     // ledges in the snow
                     if (theme == Data.WorldTheme.Snow && inland > 0.5)
@@ -221,8 +251,8 @@ public sealed class Terrain
                     }
                 }
 
-                // a pond on the meadow
-                if (theme == Data.WorldTheme.Meadow)
+                // a pond on the meadow, in the autumn wood and in the jungle (under the waterfall)
+                if (theme is Data.WorldTheme.Meadow or Data.WorldTheme.Autumn or Data.WorldTheme.Jungle)
                 {
                     var d = Math.Sqrt((ix - pond.X) * (ix - pond.X) + (iz - pond.Z) * (iz - pond.Z)) / pond.R * (1 + 0.55 * (Fbm(seed + 71, ix / 7.0, iz / 7.0, 2, 0.5) - 0.5));
                     if (d < 3.2 && h > waterLevel)
@@ -247,9 +277,163 @@ public sealed class Terrain
             }
         }
 
+        CarveLandmarks(heights, size, waterLevel, seed, theme, landmarks);
         return new Terrain(size, heights, waterLevel);
     }
 
+    /// <summary>A landmark carved into the island (grid cells, inclusive): a cave notch or the temple terrace. Its floor is one exact float32 value.</summary>
+    public sealed record Landmark(string Kind, int MinX, int MinZ, int MaxX, int MaxZ, float Floor);
+
+    /// <summary>The landmarks of the island (where caves and the temple are). Same parameters, same landmarks.</summary>
+    public static IReadOnlyList<Landmark> LandmarksOf(int size, int seed, double hillHeight, double roughness, double waterLevel, Data.WorldTheme theme)
+    {
+        var landmarks = new List<Landmark>();
+        Generate(size, seed, hillHeight, roughness, waterLevel, theme, landmarks);
+        return landmarks;
+    }
+
+    /// <summary>
+    /// Carves the landmarks after the relief: cave notches into hillsides (every theme where a hill is high enough; two on big maps) and, in the
+    /// jungle, a flat terrace for the temple. Their floors are exactly flat (one float32 value over many cells): the browser finds them by that
+    /// and puts the rock arch of the cave mouth or the temple onto them. A cave is a dead end a bunny can walk into: a level approach, a flat
+    /// floor, walls on three sides that are higher than a bunny.
+    /// </summary>
+    private static void CarveLandmarks(float[] heights, int size, double waterLevel, int seed, Data.WorldTheme theme, List<Landmark>? found = null)
+    {
+        var landmarks = found ?? [];
+        var random = new Random(unchecked(seed * 31 + 7));
+        float At(int x, int z) => heights[z * size + x];
+        bool FarFromOthers(int x, int z) => landmarks.All(l => Math.Abs((l.MinX + l.MaxX) / 2 - x) + Math.Abs((l.MinZ + l.MaxZ) / 2 - z) > 22);
+
+        if (theme == Data.WorldTheme.Jungle)
+        {
+            const int half = 7;
+            for (var attempt = 0; attempt < 1500; attempt++)
+            {
+                var cx = random.Next(18, size - 18);
+                var cz = random.Next(18, size - 18);
+                var floor = At(cx, cz);
+                if (floor < waterLevel + 0.8 || floor > waterLevel + 6)
+                {
+                    continue;
+                }
+
+                var fits = true;
+                for (var z = cz - half - 3; z <= cz + half + 3 && fits; z++)
+                {
+                    for (var x = cx - half - 3; x <= cx + half + 3 && fits; x++)
+                    {
+                        var h = At(x, z);
+                        fits = h > waterLevel + 0.4 && Math.Abs(h - floor) < 3.2;
+                    }
+                }
+
+                if (!fits)
+                {
+                    continue;
+                }
+
+                // the terrace, and around it a ramp of three cells to the land
+                for (var z = cz - half - 3; z <= cz + half + 3; z++)
+                {
+                    for (var x = cx - half - 3; x <= cx + half + 3; x++)
+                    {
+                        var ring = Math.Max(Math.Abs(x - cx), Math.Abs(z - cz));
+                        var i = z * size + x;
+                        heights[i] = ring <= half ? floor : (float)(heights[i] + (floor - heights[i]) * SmoothStep(half + 3.5, half, ring));
+                    }
+                }
+
+                landmarks.Add(new Landmark("temple", cx - half, cz - half, cx + half, cz + half, floor));
+                break;
+            }
+        }
+
+        // caves: a rocky hill is raised behind a level spot and a notch is cut into it, so every island gets its caves (not only where a
+        // hillside happens to fit)
+        (int X, int Z)[] directions = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+        const int length = 9, width = 2;
+        var (shoulder, falloff) = size < 80 ? (4, 3) : (5, 4);
+        var wanted = size >= 100 ? 2 : 1;
+        var caves = 0;
+        for (var attempt = 0; attempt < 4000 && caves < wanted; attempt++)
+        {
+            var ex = random.Next(12, size - 12);
+            var ez = random.Next(12, size - 12);
+            var (dx, dz) = directions[random.Next(4)];
+            var floor = At(ex, ez);
+            if (floor < waterLevel + 0.6 || floor > waterLevel + 7 || !FarFromOthers(ex + dx * length / 2, ez + dz * length / 2))
+            {
+                continue;
+            }
+
+            // a level approach in front, and the whole hill on land (not into the sea, not up a cliff, inside the map)
+            var ok = true;
+            for (var k = -3; k <= length + 1 + falloff && ok; k++)
+            {
+                var reach = k < 0 ? 1 : shoulder + falloff;
+                for (var w = -reach; w <= reach && ok; w++)
+                {
+                    var x = ex + dx * k + dz * w;
+                    var z = ez + dz * k + dx * w;
+                    if (x < 8 || z < 8 || x > size - 9 || z > size - 9)
+                    {
+                        ok = false;
+                        break;
+                    }
+
+                    var h = At(x, z);
+                    ok = k < 0 ? Math.Abs(h - floor) < (k == -1 ? 0.3 : 0.6) && h > waterLevel + 0.3 : h > waterLevel + 0.35 && (k > 2 || h > floor - 0.6); // behind the mouth anything goes: a higher hill only makes the walls higher
+                }
+            }
+
+            if (!ok)
+            {
+                continue;
+            }
+
+            // the hill: walls 2.6–3.2 m above the floor around the notch, sinking softly to the land outside
+            var top = floor + 2.6 + 0.6 * ValueNoise(seed + 97, ex / 3.0, ez / 3.0);
+            int minX = int.MaxValue, minZ = int.MaxValue, maxX = 0, maxZ = 0;
+            for (var k = 0; k <= length + 1 + falloff; k++)
+            {
+                for (var w = -shoulder - falloff; w <= shoulder + falloff; w++)
+                {
+                    var x = ex + dx * k + dz * w;
+                    var z = ez + dz * k + dx * w;
+                    // distance outside the core of the hill (the core reaches from the mouth to the back wall, shoulder cells to each side)
+                    var outK = Math.Max(0, k - (length + 1));
+                    var outW = Math.Max(0, Math.Abs(w) - shoulder);
+                    var outside = Math.Sqrt(outK * outK + outW * outW);
+                    var lump = 0.35 * (ValueNoise(seed + 101, x / 2.5, z / 2.5) - 0.5);
+                    var mouth = k == 0 ? 0.55 : k == 1 ? 0.8 : 1.0; // the hill dips a little towards the mouth
+                    var raised = floor + (top - floor + lump) * mouth * SmoothStep(falloff, 0, outside);
+                    var i = z * size + x;
+                    if (raised > heights[i])
+                    {
+                        heights[i] = (float)raised;
+                    }
+                }
+            }
+
+            for (var k = 0; k <= length; k++)
+            {
+                for (var w = -width; w <= width; w++)
+                {
+                    var x = ex + dx * k + dz * w;
+                    var z = ez + dz * k + dx * w;
+                    heights[z * size + x] = floor;
+                    minX = Math.Min(minX, x);
+                    minZ = Math.Min(minZ, z);
+                    maxX = Math.Max(maxX, x);
+                    maxZ = Math.Max(maxZ, z);
+                }
+            }
+
+            landmarks.Add(new Landmark("cave", minX, minZ, maxX, maxZ, floor));
+            caves++;
+        }
+    }
     private static double Fbm(int seed, double x, double z, int octaves, double persistence)
     {
         double n = 0, amplitude = 1, total = 0, frequency = 1;

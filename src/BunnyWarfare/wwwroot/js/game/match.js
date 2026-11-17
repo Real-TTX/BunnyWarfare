@@ -376,7 +376,7 @@ export class Match {
                 bunny.hurt(e.amount); // bigger hits, more slapstick
                 this.floaters.add(bunny.position, `−${e.amount}`);
             },
-            death: (e, bunny) => this.floaters.add(bunny.position, e.cause === 'water' ? 'Plumps!' : 'K.O.', 'ko'),
+            death: (e, bunny) => this.floaters.add(bunny.position, e.cause === 'water' ? (world.theme === 'Volcano' ? 'Brutzel!' : 'Plumps!') : 'K.O.', 'ko'),
             splash: point => {
                 world.effects.splash(point);
                 this.sound.splash();
