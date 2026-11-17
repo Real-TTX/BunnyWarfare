@@ -1,0 +1,39 @@
+@page "/Account/Register"
+@model BunnyWarfare.Pages.Account.RegisterModel
+@{
+    Layout = "_LayoutAuth";
+    ViewData["Title"] = "Registrieren";
+}
+
+<div class="mat-auth__card">
+    <div class="mat-auth__brand bw-auth__brand">
+        <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="72" height="72" />
+        <h1>@(Model.First ? "Willkommen bei BunnyWarfare" : "Registrieren")</h1>
+        <p class="mat-muted">@(Model.First ? "Das erste Konto dieses Servers – es wird der Administrator." : "Ein Konto, ein Team, unendlich viele Karotten.")</p>
+    </div>
+
+    @if (!Model.Allowed)
+    {
+        <div class="mat-alert mat-alert--warning" role="status">
+            @Ui.Icon("alert")
+            <div class="mat-alert__body">Die Registrierung ist geschlossen. Frag die Administration nach einem Konto.</div>
+        </div>
+        <p class="mat-muted"><a href="/Account/Login">Zur Anmeldung</a></p>
+    }
+    else
+    {
+        <form class="mat-form" method="post" novalidate>
+            <partial name="_FormSummary" model="ViewData.ModelState" />
+            <md-field name="DisplayName" label="Dein Name" required value="@Model.DisplayName" maxlength="60" autofocus hint="So sehen dich die anderen im Spiel." />
+            <md-field name="LoginName" label="Anmeldename" required value="@Model.LoginName" maxlength="40" autocomplete="username" hint="3 bis 40 Zeichen: Buchstaben, Ziffern, Punkt, Strich, Unterstrich." />
+            <md-field name="Password" kind="password" label="Passwort" required autocomplete="new-password" hint="@($"Mindestens {PlayerLogic.PasswordMinLength} Zeichen.")" />
+            <div class="mat-btn-row mat-btn-row--plain">
+                <button type="submit" class="mat-btn mat-btn--primary mat-btn--block">@Ui.Icon("user")<span>Konto anlegen</span></button>
+            </div>
+            @if (!Model.First)
+            {
+                <p class="mat-muted">Schon ein Konto? <a href="/Account/Login">Anmelden</a></p>
+            }
+        </form>
+    }
+</div>

@@ -1,0 +1,30 @@
+@page "/Account"
+@model BunnyWarfare.Pages.Account.IndexModel
+@{
+    ViewData["Title"] = "Profil & Team";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Einstellungen", null), ("Profil & Team", null) };
+    ViewData["Width"] = "narrow";
+}
+
+<md-tabs label="Konto">
+    <md-tab href="/Account" active>Profil &amp; Team</md-tab>
+    <md-tab href="/Account/Security">Sicherheit</md-tab>
+</md-tabs>
+
+<form class="mat-form" method="post" novalidate>
+    <partial name="_FormSummary" model="ViewData.ModelState" />
+    <div class="mat-card">
+        <div class="mat-card__head"><h2 class="mat-card__title">Profil</h2></div>
+        <div class="mat-card__body mat-form">
+            <md-field name="DisplayName" label="Name" required value="@Model.DisplayName" maxlength="60" />
+        </div>
+    </div>
+    <div class="mat-card">
+        <div class="mat-card__head"><h2 class="mat-card__title">Dein Team</h2></div>
+        <div class="mat-card__body mat-form">
+            <md-field name="TeamName" label="Teamname" required value="@Model.TeamName" maxlength="40" hint="Mit diesem Namen ziehen deine Hasen in jede Schlacht." />
+            <md-field name="TeamColor" kind="colour" label="Teamfarbe" value="@Model.TeamColor" options="Model.Colors" hint="Ist die Farbe in einem Spiel schon vergeben, bekommst du eine freie." />
+        </div>
+    </div>
+    <md-buttons save="Speichern" back="/" />
+</form>

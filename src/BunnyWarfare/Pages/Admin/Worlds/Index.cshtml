@@ -1,0 +1,45 @@
+@page "/Admin/Worlds"
+@model BunnyWarfare.Pages.Admin.Worlds.IndexModel
+@{
+    ViewData["Title"] = "Welten";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("Welten", null) };
+}
+
+<div class="mat-list">
+    <partial name="_Toolbar" model="Model.Toolbar" />
+
+    @if (Model.Items.Count == 0)
+    {
+        <partial name="_Empty" model="@(new EmptyStateModel("globe-map", Model.Toolbar.Total == 0 ? "Noch keine Welten" : "Keine Welt gefunden", Model.Toolbar.Total == 0 ? "Ohne Welt kann niemand spielen – lege die erste an." : "Ändere die Suche oder die Filter.", Model.Toolbar.Total == 0, "/Admin/Worlds/Edit", "Neue Welt", Model.Toolbar.UrlReset()))" />
+    }
+    else
+    {
+        <md-table caption="Welten">
+            <thead>
+                <tr><th scope="col">Welt</th><th scope="col">Thema</th><th scope="col" class="mat-num">Größe</th><th scope="col" class="mat-num mat-hide-sm">Hügel</th><th scope="col" class="mat-num mat-hide-sm">Schwerkraft</th><th scope="col" class="mat-num mat-hide-sm">Wind</th><th scope="col" class="mat-num mat-hide-sm">Spiele</th><th scope="col">Status</th><th scope="col"><span class="mat-sr-only">Aktionen</span></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var w in Model.Items)
+                {
+                    <tr>
+                        <td data-label="Welt"><a href="/Admin/Worlds/Edit?id=@w.Id">@w.Name</a></td>
+                        <td data-label="Thema"><span class="bw-theme bw-theme--@w.Theme.ToString().ToLowerInvariant()">@WorldLogic.ThemeName(w.Theme)</span></td>
+                        <td data-label="Größe" class="mat-num mat-mono">@Ui.Number(WorldLogic.WidthOf(w.GridSize), "0") m</td>
+                        <td data-label="Hügel" class="mat-num mat-mono mat-hide-sm">@Ui.Number(w.HillHeight) m</td>
+                        <td data-label="Schwerkraft" class="mat-num mat-mono mat-hide-sm">@Ui.Number(w.Gravity)</td>
+                        <td data-label="Wind" class="mat-num mat-mono mat-hide-sm">@Ui.Number(w.MaxWind)</td>
+                        <td data-label="Spiele" class="mat-num mat-mono mat-hide-sm">@w.Matches</td>
+                        <td data-label="Status">@if (w.IsEnabled) { <span class="mat-pill mat-pill--ok">Aktiv</span> } else { <span class="mat-pill mat-pill--plain">Aus</span> }</td>
+                        <td class="mat-table__cell-actions"><div class="mat-table__actions"><a class="mat-btn mat-btn--ghost mat-btn--icon mat-btn--sm" href="/Admin/Worlds/Edit?id=@w.Id" aria-label="@w.Name bearbeiten" data-tip="Bearbeiten">@Ui.Icon("edit")</a></div></td>
+                    </tr>
+                }
+            </tbody>
+        </md-table>
+    }
+
+    <partial name="_Pager" model="Model.Pager" />
+
+    <div class="mat-actions">
+        <a class="mat-btn mat-btn--primary" href="/Admin/Worlds/Edit">@Ui.Icon("plus")<span>Neue Welt</span></a>
+    </div>
+</div>

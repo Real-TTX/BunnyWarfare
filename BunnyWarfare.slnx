@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BunnyWarfare/BunnyWarfare.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BunnyWarfare.Tests/BunnyWarfare.Tests.csproj" />
+  </Folder>
+</Solution>

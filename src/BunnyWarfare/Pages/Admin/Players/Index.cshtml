@@ -1,0 +1,44 @@
+@page "/Admin/Players"
+@model BunnyWarfare.Pages.Admin.Players.IndexModel
+@{
+    ViewData["Title"] = "Spieler";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("Spieler", null) };
+}
+
+<div class="mat-list">
+    <partial name="_Toolbar" model="Model.Toolbar" />
+
+    @if (Model.Items.Count == 0)
+    {
+        <partial name="_Empty" model="@(new EmptyStateModel("users", Model.Toolbar.Total == 0 ? "Noch keine Spieler" : "Kein Spieler gefunden", Model.Toolbar.Total == 0 ? "Lege den ersten an." : "Ändere die Suche oder die Filter.", Model.Toolbar.Total == 0, "/Admin/Players/Edit", "Neuer Spieler", Model.Toolbar.UrlReset()))" />
+    }
+    else
+    {
+        <md-table caption="Spieler">
+            <thead>
+                <tr><th scope="col">Spieler</th><th scope="col" class="mat-hide-sm">Team</th><th scope="col">Rolle</th><th scope="col">Status</th><th scope="col" class="mat-num">Spiele</th><th scope="col" class="mat-num mat-hide-sm">Siege</th><th scope="col" class="mat-hide-sm">Letzte Anmeldung</th><th scope="col"><span class="mat-sr-only">Aktionen</span></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var p in Model.Items)
+                {
+                    <tr>
+                        <td data-label="Spieler"><div class="mat-table__name"><span class="mat-avatar mat-avatar--sm" aria-hidden="true">@Ui.Initials(p.DisplayName)</span><span><a href="/Admin/Players/Edit?id=@p.Id">@p.DisplayName</a><small class="mat-mono">@p.LoginName</small></span></div></td>
+                        <td data-label="Team" class="mat-hide-sm">@Ui.Swatch(p.TeamColor) @p.TeamName</td>
+                        <td data-label="Rolle"><span class="mat-pill @(p.Role == PlayerRole.Admin ? "mat-pill--accent" : "mat-pill--plain")">@(p.Role == PlayerRole.Admin ? "Administrator" : "Spieler")</span></td>
+                        <td data-label="Status">@if (p.IsActive) { <span class="mat-pill mat-pill--ok">Aktiv</span> } else { <span class="mat-pill mat-pill--error">Gesperrt</span> }</td>
+                        <td data-label="Spiele" class="mat-num mat-mono">@p.GamesPlayed</td>
+                        <td data-label="Siege" class="mat-num mat-mono mat-hide-sm">@p.GamesWon</td>
+                        <td data-label="Letzte Anmeldung" class="mat-mono mat-hide-sm">@Ui.Stamp(p.LastLoginDate)</td>
+                        <td class="mat-table__cell-actions"><div class="mat-table__actions"><a class="mat-btn mat-btn--ghost mat-btn--icon mat-btn--sm" href="/Admin/Players/Edit?id=@p.Id" aria-label="@p.DisplayName bearbeiten" data-tip="Bearbeiten">@Ui.Icon("edit")</a></div></td>
+                    </tr>
+                }
+            </tbody>
+        </md-table>
+    }
+
+    <partial name="_Pager" model="Model.Pager" />
+
+    <div class="mat-actions">
+        <a class="mat-btn mat-btn--primary" href="/Admin/Players/Edit">@Ui.Icon("plus")<span>Neuer Spieler</span></a>
+    </div>
+</div>

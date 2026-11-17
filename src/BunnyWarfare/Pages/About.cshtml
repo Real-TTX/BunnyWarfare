@@ -1,0 +1,33 @@
+@page "/About"
+@model BunnyWarfare.Pages.AboutModel
+@{
+    ViewData["Title"] = "Über BunnyWarfare";
+    ViewData["Width"] = "narrow";
+    if (!User.Identity!.IsAuthenticated)
+    {
+        Layout = "_LayoutAuth";
+    }
+}
+
+@if (!User.Identity!.IsAuthenticated)
+{
+    <div class="mat-auth__brand bw-auth__brand">
+        <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="72" height="72" />
+        <h1>Über BunnyWarfare</h1>
+    </div>
+}
+
+<div class="mat-card">
+    <div class="mat-card__body">
+        <img class="bw-about__logo" src="~/img/logo/bunnywarfare-hero.svg" alt="BunnyWarfare" width="384" height="192" />
+        <p>Rundenbasierte 3D-Artillerie mit Hasen: Teams aus Hasen bekämpfen sich auf kleinen Inseln mit Karotten, Rüben und Kohlköpfen – im Browser, allein gegen Bots oder mit Freunden über das Netz.</p>
+        <dl class="mat-kv">
+            <dt>Version</dt><dd class="mat-mono">@AppInfo.Version</dd>
+            <dt>Gestartet</dt><dd class="mat-mono">@Ui.Stamp(AppInfo.Started)</dd>
+            <dt>Laufzeit</dt><dd class="mat-mono">.NET @Environment.Version</dd>
+            <dt>Grafik</dt><dd>three.js (MIT)</dd>
+            <dt>Echtzeit</dt><dd>ASP.NET Core SignalR</dd>
+            <dt>Oberfläche</dt><dd>MatUi (MatDesign)</dd>
+        </dl>
+    </div>
+</div>

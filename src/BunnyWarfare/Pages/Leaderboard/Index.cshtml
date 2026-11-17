@@ -1,0 +1,40 @@
+@page "/Leaderboard"
+@model BunnyWarfare.Pages.Leaderboard.IndexModel
+@{
+    ViewData["Title"] = "Rangliste";
+    ViewData["PageSub"] = "Sortiert nach Siegen, dann Treffern, dann Schaden.";
+}
+
+<div class="mat-list">
+    <partial name="_Toolbar" model="Model.Toolbar" />
+
+    @if (Model.Items.Count == 0)
+    {
+        <partial name="_Empty" model="@(new EmptyStateModel("trophy", "Niemand gefunden", "Ändere die Suche oder den Filter.", false, null, null, Model.Toolbar.UrlReset()))" />
+    }
+    else
+    {
+        <md-table caption="Rangliste">
+            <thead>
+                <tr><th scope="col" class="mat-num">#</th><th scope="col">Spieler</th><th scope="col" class="mat-hide-sm">Team</th><th scope="col" class="mat-num">Spiele</th><th scope="col" class="mat-num">Siege</th><th scope="col" class="mat-num mat-hide-sm">Quote</th><th scope="col" class="mat-num">Treffer</th><th scope="col" class="mat-num mat-hide-sm">Schaden</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.Items)
+                {
+                    <tr class="@(r.PlayerId == Model.Me.PlayerId ? "bw-row--me" : "")">
+                        <td data-label="#" class="mat-num mat-mono">@(r.Rank <= 3 ? Ui.Icon("trophy", $"bw-medal bw-medal--{r.Rank}") : null) @r.Rank</td>
+                        <td data-label="Spieler"><div class="mat-table__name"><span class="mat-avatar mat-avatar--sm" aria-hidden="true">@Ui.Initials(r.DisplayName)</span><span>@r.DisplayName</span></div></td>
+                        <td data-label="Team" class="mat-hide-sm">@Ui.Swatch(r.TeamColor) @r.TeamName</td>
+                        <td data-label="Spiele" class="mat-num mat-mono">@r.GamesPlayed</td>
+                        <td data-label="Siege" class="mat-num mat-mono">@r.GamesWon</td>
+                        <td data-label="Quote" class="mat-num mat-mono mat-hide-sm">@r.WinRate %</td>
+                        <td data-label="Treffer" class="mat-num mat-mono">@r.Kills</td>
+                        <td data-label="Schaden" class="mat-num mat-mono mat-hide-sm">@r.DamageDealt</td>
+                    </tr>
+                }
+            </tbody>
+        </md-table>
+    }
+
+    <partial name="_Pager" model="Model.Pager" />
+</div>

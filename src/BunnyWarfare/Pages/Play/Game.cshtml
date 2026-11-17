@@ -1,0 +1,187 @@
+@page "/Play/{token:guid}"
+@model BunnyWarfare.Pages.Play.GameModel
+@inject Assets Toolkit
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="de" data-app="@Ui.AppId" data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="@Ui.Accent" />
+    <title>@Model.MatchName · @Ui.AppName</title>
+    <link rel="icon" type="image/svg+xml" href="~/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="~/img/favicon-32.png" />
+    <link rel="manifest" href="~/manifest.webmanifest" />
+    <link rel="stylesheet" href="~/matui/matui.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/game.css" asp-append-version="true" />
+    @* the "!" opts out of the import map tag helper of ASP.NET Core, which would drop the type *@
+    <!script type="importmap">{ "imports": { "three": "/lib/three/three.module.js" } }</!script>
+</head>
+<body class="bw-game"
+      data-token="@Model.Token"
+      data-player-id="@Model.Me.PlayerId"
+      data-player-name="@Model.Me.DisplayName"
+      data-quick="@(Model.Quick ? "1" : "0")">
+    @Html.Raw(Toolkit.Sprite)
+
+    @* the 3D scene fills the window; everything else lies on top of it *@
+    <div id="bw-stage" class="bw-stage" aria-label="Spielfeld"></div>
+    <div id="bw-floaters" class="bw-floaters" aria-hidden="true"></div>
+
+    <div id="bw-hud" class="bw-hud" hidden>
+        <header class="bw-top">
+            <div class="bw-panel bw-turn" id="bw-turn">
+                <span class="bw-turn__dot" id="bw-turn-dot"></span>
+                <div class="bw-turn__text">
+                    <strong id="bw-turn-title">–</strong>
+                    <small id="bw-turn-sub"></small>
+                </div>
+                <div class="bw-turn__timer" id="bw-timer" title="Zeit des Zuges">–</div>
+            </div>
+            <div class="bw-panel bw-wind" title="Wind">
+                <svg class="bw-wind__arrow" id="bw-wind-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 L18 13 H14 V21 H10 V13 H6 Z" /></svg>
+                <div class="bw-wind__bar"><span id="bw-wind-fill"></span></div>
+                <small id="bw-wind-text">Wind</small>
+            </div>
+        </header>
+
+        <aside class="bw-panel bw-teams" id="bw-teams" aria-label="Teams"></aside>
+
+        <aside class="bw-panel bw-chat" aria-label="Chat">
+            <div class="bw-chat__log" id="bw-chat-log" aria-live="polite"></div>
+            <form class="bw-chat__form" id="bw-chat-form" autocomplete="off">
+                <input class="mat-input bw-chat__input" id="bw-chat-input" maxlength="200" placeholder="Enter = Chat" aria-label="Chat-Nachricht" />
+            </form>
+        </aside>
+
+        <div class="bw-menu">
+            <button type="button" class="bw-icon-btn" id="bw-btn-help" title="Hilfe (H)" aria-label="Hilfe">?</button>
+            <button type="button" class="bw-icon-btn" id="bw-btn-sound" title="Ton an/aus" aria-label="Ton an/aus">♪</button>
+            <button type="button" class="bw-icon-btn" id="bw-btn-full" title="Vollbild" aria-label="Vollbild">⛶</button>
+            <button type="button" class="bw-icon-btn" id="bw-btn-menu" title="Menü" aria-label="Menü">☰</button>
+            <div class="bw-panel bw-dropdown" id="bw-dropdown" hidden>
+                <button type="button" class="bw-dropdown__item" id="bw-btn-surrender">Aufgeben</button>
+                <a class="bw-dropdown__item" href="/Play">Spiel verlassen</a>
+                <a class="bw-dropdown__item" href="/">Zur Übersicht</a>
+            </div>
+        </div>
+
+        <footer class="bw-bottom">
+            <div class="bw-panel bw-stamina" id="bw-stamina" hidden>
+                <small>Ausdauer</small>
+                <div class="bw-bar"><span id="bw-stamina-fill"></span></div>
+            </div>
+            <div class="bw-panel bw-arsenal">
+                <div class="bw-weapons" id="bw-weapons" role="toolbar" aria-label="Waffen"></div>
+                <div class="bw-arsenal__row">
+                    <div class="bw-aiminfo" id="bw-aiminfo">Winkel –</div>
+                    <div class="bw-power" title="Kraft (Leertaste halten)"><span id="bw-power-fill"></span></div>
+                    <button type="button" class="mat-btn mat-btn--primary bw-fire" id="bw-btn-fire">Feuer</button>
+                    <button type="button" class="mat-btn mat-btn--secondary" id="bw-btn-skip" title="Zug beenden (Tab)">Zug beenden</button>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <div class="bw-help bw-panel" id="bw-help" hidden>
+        <h2>Steuerung</h2>
+        <ul>
+            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen (Ausdauer pro Zug)</li>
+            <li><kbd>Maus ziehen</kbd> Kamera drehen = Richtung zielen</li>
+            <li><kbd>Mausrad</kbd> zoomen</li>
+            <li><kbd>↑</kbd><kbd>↓</kbd> / <kbd>R</kbd><kbd>F</kbd> Winkel</li>
+            <li><kbd>Leertaste</kbd> halten = Kraft, loslassen = Feuer</li>
+            <li><kbd>1</kbd>–<kbd>9</kbd> Waffe · Luftschlag: Ziel anklicken</li>
+            <li><kbd>Tab</kbd> Zug beenden · <kbd>Enter</kbd> Chat · <kbd>H</kbd> Hilfe</li>
+        </ul>
+        <button type="button" class="mat-btn mat-btn--secondary" id="bw-help-close">Schließen</button>
+    </div>
+
+    @* the lobby: who plays, the rules, the start *@
+    <div class="bw-overlay" id="bw-lobby" hidden>
+        <div class="mat-card bw-lobby">
+            <div class="mat-card__head bw-lobby__head">
+                <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="48" height="48" />
+                <div>
+                    <h1 class="mat-card__title" id="bw-lobby-name">@Model.MatchName</h1>
+                    <small class="mat-muted" id="bw-lobby-rules"></small>
+                </div>
+            </div>
+            <div class="mat-card__body">
+                <ul class="bw-slots" id="bw-slots"></ul>
+                <div class="bw-lobby__bots" id="bw-lobby-bots" hidden>
+                    <span class="mat-muted">Bot dazu:</span>
+                    <button type="button" class="mat-btn mat-btn--secondary mat-btn--sm" data-bot="Easy">Leicht</button>
+                    <button type="button" class="mat-btn mat-btn--secondary mat-btn--sm" data-bot="Normal">Normal</button>
+                    <button type="button" class="mat-btn mat-btn--secondary mat-btn--sm" data-bot="Hard">Schwer</button>
+                </div>
+                <p class="mat-muted" id="bw-lobby-hint"></p>
+            </div>
+            <div class="mat-card__foot">
+                <div class="mat-btn-row">
+                    <button type="button" class="mat-btn mat-btn--primary" id="bw-btn-start" hidden>Spiel starten</button>
+                    <button type="button" class="mat-btn mat-btn--secondary" id="bw-btn-invite">Einladungslink kopieren</button>
+                    <span class="mat-btn-row__spacer"></span>
+                    <a class="mat-btn mat-btn--ghost" href="/Play">Verlassen</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* the end: winner and ranking *@
+    <div class="bw-overlay" id="bw-over" hidden>
+        <div class="mat-card bw-result">
+            <div class="mat-card__head bw-lobby__head">
+                <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="48" height="48" />
+                <div>
+                    <h1 class="mat-card__title" id="bw-over-title">Spiel vorbei</h1>
+                    <small class="mat-muted" id="bw-over-sub"></small>
+                </div>
+            </div>
+            <div class="mat-card__body">
+                <table class="mat-table bw-result__table">
+                    <thead><tr><th>Platz</th><th>Team</th><th class="mat-num">Treffer</th><th class="mat-num">Schaden</th></tr></thead>
+                    <tbody id="bw-over-rows"></tbody>
+                </table>
+            </div>
+            <div class="mat-card__foot">
+                <div class="mat-btn-row">
+                    <a class="mat-btn mat-btn--primary" href="/Play/New">Nochmal</a>
+                    <a class="mat-btn mat-btn--secondary" href="/">Zur Übersicht</a>
+                    <span class="mat-btn-row__spacer"></span>
+                    <button type="button" class="mat-btn mat-btn--ghost" id="bw-over-view">Insel ansehen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bw-overlay bw-overlay--dim" id="bw-confirm" hidden>
+        <div class="mat-card bw-confirm">
+            <div class="mat-card__body">
+                <h2 class="mat-card__title">Wirklich aufgeben?</h2>
+                <p class="mat-muted">Alle deine Hasen verlassen das Schlachtfeld.</p>
+            </div>
+            <div class="mat-card__foot">
+                <div class="mat-btn-row">
+                    <button type="button" class="mat-btn mat-btn--danger" id="bw-confirm-yes">Aufgeben</button>
+                    <button type="button" class="mat-btn mat-btn--secondary" id="bw-confirm-no">Weiterkämpfen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bw-loading" id="bw-loading">
+        <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="96" height="96" />
+        <p>Hasen werden geweckt…</p>
+    </div>
+    <div class="bw-banner" id="bw-banner" hidden></div>
+    <div class="bw-toasts" id="bw-toasts" aria-live="assertive"></div>
+
+    <noscript><p class="bw-noscript">BunnyWarfare braucht JavaScript und WebGL.</p></noscript>
+
+    <script src="~/lib/signalr/signalr.min.js"></script>
+    <script type="module" src="~/js/game/main.js" asp-append-version="true"></script>
+</body>
+</html>

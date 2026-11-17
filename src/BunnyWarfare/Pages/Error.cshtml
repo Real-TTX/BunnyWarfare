@@ -1,0 +1,21 @@
+@page "/Error"
+@model BunnyWarfare.Pages.ErrorModel
+@{
+    Layout = "_LayoutAuth";
+    ViewData["Title"] = "Fehler";
+}
+
+<div class="mat-auth__card">
+    <div class="mat-auth__brand bw-auth__brand">
+        <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="72" height="72" />
+        <h1>Da ist etwas schiefgegangen</h1>
+        <p class="mat-muted">Ein Hase hat ins Kabel gebissen. Bitte versuche es noch einmal.</p>
+    </div>
+    @if (!string.IsNullOrEmpty(Model.RequestId))
+    {
+        <p class="mat-muted mat-mono">Anfrage: @Model.RequestId</p>
+    }
+    <div class="mat-btn-row mat-btn-row--plain">
+        <a class="mat-btn mat-btn--primary mat-btn--block" href="/">@Ui.Icon("home")<span>Zum Start</span></a>
+    </div>
+</div>

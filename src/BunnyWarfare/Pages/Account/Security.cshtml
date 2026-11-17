@@ -1,0 +1,24 @@
+@page "/Account/Security"
+@model BunnyWarfare.Pages.Account.SecurityModel
+@{
+    ViewData["Title"] = "Sicherheit";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Einstellungen", null), ("Sicherheit", null) };
+    ViewData["Width"] = "narrow";
+}
+
+<md-tabs label="Konto">
+    <md-tab href="/Account">Profil &amp; Team</md-tab>
+    <md-tab href="/Account/Security" active>Sicherheit</md-tab>
+</md-tabs>
+
+<form class="mat-form" method="post" novalidate>
+    <partial name="_FormSummary" model="ViewData.ModelState" />
+    <div class="mat-card">
+        <div class="mat-card__head"><h2 class="mat-card__title">Passwort ändern</h2></div>
+        <div class="mat-card__body mat-form">
+            <md-field name="CurrentPassword" kind="password" label="Aktuelles Passwort" required autocomplete="current-password" />
+            <md-field name="NewPassword" kind="password" label="Neues Passwort" required autocomplete="new-password" hint="@($"Mindestens {PlayerLogic.PasswordMinLength} Zeichen.")" />
+        </div>
+    </div>
+    <md-buttons save="Passwort ändern" save-icon="key" back="/" />
+</form>
