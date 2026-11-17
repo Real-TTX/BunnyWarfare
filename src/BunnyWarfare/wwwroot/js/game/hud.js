@@ -69,6 +69,7 @@ export class Hud {
             el('span', null, `${room.bunniesPerTeam} Hasen pro Team`),
             el('span', null, `${room.bunnyHealth} Leben`),
             el('span', null, `${room.turnSeconds} s pro Zug`),
+            room.crateRate !== undefined && room.crateRate !== null ? el('span', null, ['Keine Kisten', 'Selten Kisten', 'Kisten', 'Oft Kisten'][room.crateRate] ?? 'Kisten') : null,
             el('span', null, `bis ${room.maxTeams} Teams`)].filter(Boolean));
         panel.querySelector('[data-world]').textContent = room.worldName;
         if (this.lobbyMap?.name !== room.worldName) {
@@ -306,8 +307,10 @@ export class Hud {
             const fill = el('i');
             fill.style.width = `${(hp / max) * 100}%`;
             fill.style.background = t.color;
+            // what the team got from crates and has not used yet
+            const effects = (t.effects ?? []).map(e => el('span', `fx-badge fx-${e}`, e === 'double' ? '×2' : e === 'turbo' ? 'Turbo' : e));
             const row = el('div', `hteam${t.index === currentTeam ? ' is-current' : ''}${t.out ? ' is-out' : ''}`, [
-                el('div', 'head', [face, el('span', 'name', t.name + (t.isBot ? ' · Bot' : '')), el('span', null, String(hp))]),
+                el('div', 'head', [face, el('span', 'name', t.name + (t.isBot ? ' · Bot' : '')), ...effects, el('span', null, String(hp))]),
                 el('div', 'bar', fill),
                 el('small', null, `${alive} Hasen${t.kills > 0 ? ` · ${t.kills} K.O.` : ''}`),
             ]);
@@ -323,8 +326,11 @@ export class Hud {
             weapons.forEach((w, i) => {
                 const b = el('button', 'weapon');
                 b.type = 'button';
-                b.title = `${w.name} – ${w.damage} Schaden, Radius ${String(w.radius).replace('.', ',')} m${w.wind ? ', windanfällig' : ''}`;
-                b.append(el('span', 'key', String(i + 1)), weaponIcon(w.kind), el('span', 'nm', w.name), el('span', 'ammo', ''));
+                b.title = w.kind === 'Teleport'
+                    ? `${w.name} – buddelt deinen Hasen an eine andere Stelle${w.ammo === 0 ? ' (nur aus Kisten)' : ''}`
+                    : `${w.name} – ${w.damage} Schaden, Radius ${String(w.radius).replace('.', ',')} m${w.wind ? ', windanfällig' : ''}${w.ammo === 0 ? ' (nur aus Kisten)' : ''}`;
+                if (w.ammo === 0) b.classList.add('is-crate-only');
+                b.append(el('span', 'key', String(i + 1)), weaponIcon(w.kind, w.name), el('span', 'nm', w.name), el('span', 'ammo', ''));
                 b.onclick = () => onSelect(w.id);
                 bar.append(b);
                 this.weaponButtons.set(w.id, b);
@@ -347,6 +353,12 @@ export class Hud {
     power(value, charging) {
         $('bw-power-fill').style.width = `${Math.round(value * 100)}%`;
         $('bw-power').classList.toggle('is-charging', charging);
+    }
+
+    /** The bird's-eye view is on (the round HUD button shows it). */
+    birdsEye(on) {
+        const button = $('bw-btn-bird');
+        if (button && button.classList.contains('is-on') !== !!on) button.classList.toggle('is-on', !!on);
     }
 
     aimInfo(text) {

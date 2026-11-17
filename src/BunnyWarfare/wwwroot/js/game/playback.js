@@ -1,12 +1,13 @@
 // Plays a shot the server has already computed (ShotResult): flights, rays, explosions with craters, damage, knockback, deaths.
 // The timing follows the server exactly (every time in the result is seconds after the shot); only the looks are added here:
-// the shooter's fire animation, spinning and wobbling projectiles, trails, bunnies that tumble along their knockback track, flinch and land.
+// the shooter's fire animation, spinning and wobbling projectiles, trails, bunnies that tumble along their knockback track, flinch and land;
+// crates that are destroyed, picked up, moved or sunk during the shot, and the Hasenloch (the bunny digs in and pops out at the target).
 import * as THREE from 'three';
 import { projectileModel } from './effects.js';
 
 export const SAMPLE = 1 / 30;
 
-const KINDS = ['Projectile', 'Grenade', 'Cluster', 'Hitscan', 'Airstrike'];
+const KINDS = ['Projectile', 'Grenade', 'Cluster', 'Hitscan', 'Airstrike', 'Teleport'];
 
 function at(points, i, target) {
     return target.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
@@ -29,7 +30,7 @@ function along(points, time, target) {
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class ShotPlayback {
-    /** hooks: explosion(event, point), damage(event, bunny), death(event, bunny), splash(point), launch(result), ray(from, to) */
+    /** hooks: explosion(event, point), damage(event, bunny), death(event, bunny), splash(point), launch(result), ray(from, to), crate(event), teleport(event, 'in' | 'out') */
     constructor(world, result, hooks) {
         this.world = world;
         this.hooks = hooks;
@@ -49,7 +50,10 @@ export class ShotPlayback {
             ...(result.explosions ?? []).map(e => ({ t: e.t, kind: 'explosion', e })),
             ...(result.damages ?? []).map(e => ({ t: e.t, kind: 'damage', e })),
             ...(result.deaths ?? []).map(e => ({ t: e.t, kind: 'death', e })),
+            ...(result.crates ?? []).map(e => ({ t: e.t, kind: 'crate', e })),
+            ...(result.teleports ?? []).flatMap(e => [{ t: e.t, kind: 'dig', e }, { t: e.t + 0.55, kind: 'pop', e }]),
         ].sort((a, b) => a.t - b.t || order(a.kind) - order(b.kind));
+        this.teleports = result.teleports ?? [];
         this.cursor = 0;
         this.trailClock = 0;
 
@@ -127,6 +131,10 @@ export class ShotPlayback {
             }
         }
 
+        // the Hasenloch: watch where the bunny digs in, then where it comes out
+        for (const e of this.teleports) {
+            if (t >= e.t - 0.1 && t < e.t + 1.4) focus = new THREE.Vector3(...(t < e.t + 0.55 ? e.from : e.to)).add(new THREE.Vector3(0, 0.8, 0));
+        }
         if (!focus && this.lastBlast && t - this.lastBlast.t < 1.2) focus = this.lastBlast.at;
         this.focus = focus;
         if (t >= this.duration + 0.2) this.finish();
@@ -152,6 +160,24 @@ export class ShotPlayback {
                     if (bunny.alive && e.health > 0) bunny.hurt?.(e.amount);
                     this.hooks.damage?.(e, bunny);
                 }
+                break;
+            }
+            case 'crate':
+                this.hooks.crate?.(e);
+                break;
+            case 'dig': {
+                const bunny = world.bunnies.get(e.bunnyId);
+                bunny?.digIn?.();
+                this.hooks.teleport?.(e, 'out');
+                break;
+            }
+            case 'pop': {
+                const bunny = world.bunnies.get(e.bunnyId);
+                if (bunny) {
+                    bunny.snap(e.to[0], e.to[1], e.to[2]);
+                    bunny.popOut?.();
+                }
+                this.hooks.teleport?.(e, 'in');
                 break;
             }
             case 'death': {
@@ -184,5 +210,5 @@ export class ShotPlayback {
 }
 
 function order(kind) {
-    return { ray: 0, explosion: 1, damage: 2, death: 3 }[kind] ?? 9;
+    return { dig: 0, pop: 0, ray: 0, explosion: 1, crate: 2, damage: 3, death: 4 }[kind] ?? 9;
 }

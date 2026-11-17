@@ -6,8 +6,26 @@ import { api, session, worlds, ApiError } from './api.js';
 import { mapCanvas, mapCanvasByName } from './maps.js';
 import { portrait, updatePortrait, levelBadge, sizeBadge } from './avatars.js';
 import { BunnyPreview, lookOf } from './portrait.js';
+import { shotElement } from './thumbs.js';
 
 const TOKEN_IN_LINK = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
+/** How often supply crates fall (Match.CrateRate 0..3). */
+const CRATE_RATES = ['Aus', 'Selten', 'Normal', 'Oft'];
+const BOT_NAMES = ['Rübenräuber', 'Möhrenmafia', 'Kohlkopf-Klan'];
+const BOT_COLORS = ['#2563eb', '#16a34a', '#9333ea'];
+const WILD = {
+    fur: ['tiger', 'zebra', 'neon', 'lava', 'galaxy', 'gold', 'rainbow', 'pink', 'mint', 'spotted', 'ginger', 'black'],
+    outfit: ['viking', 'pirate', 'mohawk', 'crown', 'horns', 'party', 'cowboy', 'astronaut', 'carrot', 'tophat', 'bandana'],
+    face: ['sunglasses', 'eyepatch', 'warpaint', 'mustache', 'lasers', 'scar', 'goggles', 'monocle'],
+    frame: ['fire', 'galaxy', 'gold', 'legend', 'silver'],
+};
+
+/** A random wild look for a computer bunny of the quick match (shown only; the server dresses the real bots). */
+function randomBotLook(i) {
+    const pick = list => list[Math.floor(Math.random() * list.length)];
+    return { fur: pick(WILD.fur), outfit: pick(WILD.outfit), face: pick(WILD.face), frame: pick(WILD.frame), color: BOT_COLORS[i % BOT_COLORS.length] };
+}
 
 /** Shows the message of an ApiError at its field (when it has one of these inputs) or as a toast. */
 function showError(error, inputs = {}) {
@@ -270,56 +288,134 @@ export class Menu {
 
     // ------------------------------------------------------------ quick match
 
+    /** The big picture of the chosen island (quick match): screenshot, name, theme, size, description and hints. */
+    featureOf(w) {
+        if (!w) {
+            return el('div', 'feature is-random', [
+                el('div', 'shot big dice', el('span', null, '🎲')),
+                el('div', 'feature-text', [
+                    el('h3', 'feature-name', 'Zufallsinsel'),
+                    el('div', 'row', [el('span', 'badge theme', 'Überraschung')]),
+                    el('p', null, 'Irgendeine Insel – mal klein und knackig, mal groß mit Höhlen und Häusern.'),
+                ]),
+            ]);
+        }
+        const hints = [
+            w.gravity < 6 ? '🪶 wenig Schwerkraft' : null,
+            w.maxWind >= 4 ? '💨 viel Wind' : w.maxWind <= 1.5 ? '🍃 kaum Wind' : null,
+            w.theme === 'Volcano' ? '🔥 Lava statt Wasser' : null,
+        ].filter(Boolean);
+        return el('div', 'feature', [
+            shotElement(w.id, 'shot big'),
+            el('div', 'feature-text', [
+                el('h3', 'feature-name', w.name),
+                el('div', 'row', [el('span', `badge theme theme-${w.theme}`, w.themeName ?? themeName(w.theme)), sizeBadge(w.width), el('span', 'muted', `${Math.round(w.width)} m`)]),
+                w.description ? el('p', null, w.description) : null,
+                hints.length ? el('div', 'hints', hints.map(h => el('span', 'hint-chip', h))) : null,
+            ]),
+        ]);
+    }
+
+    /** A card of an island with its screenshot (quick match, new match). */
+    worldCard(w, onPick) {
+        const card = el('button', 'wshot', w
+            ? [shotElement(w.id, 'shot'), el('span', 'wshot-name', [el('b', null, w.name), sizeBadge(w.width)])]
+            : [el('div', 'shot dice', el('span', null, '🎲')), el('span', 'wshot-name', [el('b', null, 'Zufall')])]);
+        card.type = 'button';
+        card.dataset.id = w ? String(w.id) : '';
+        card.title = w ? `${w.name} · ${w.themeName ?? themeName(w.theme)} · ${Math.round(w.width)} m` : 'Eine zufällige Insel';
+        card.onclick = () => onPick(w);
+        return card;
+    }
+
     async showQuick() {
-        const choice = { bots: 1, level: 'Normal', worldId: null };
-        const panel = el('section', 'panel narrow');
-        const bots = segmented([1, 2, 3].map(n => ({ value: n, label: String(n) })), 1, v => (choice.bots = v));
-        const level = segmented(['Easy', 'Normal', 'Hard'].map(v => ({ value: v, label: LEVEL_NAMES[v] })), 'Normal', v => (choice.level = v));
-        const worldRow = el('div', 'row');
-        const chips = [];
-        const addChip = (id, label) => {
-            const c = el('button', `chip${id === null ? ' is-on' : ''}`, label);
-            c.type = 'button';
-            c.onclick = () => {
-                choice.worldId = id;
-                for (const x of chips) x.classList.toggle('is-on', x === c);
-                const w = id === null ? null : this.worldList?.find(x => x.id === id);
-                if (w && w.name !== this.app.showcase.worldName) this.app.showcase.show(id);
-            };
-            chips.push(c);
-            worldRow.append(c);
+        const choice = { bots: 1, level: 'Normal', worldId: null, crateRate: 2 };
+        let list = [];
+        try {
+            list = await worlds();
+        } catch (error) {
+            showError(error);
+        }
+        const feature = el('div', 'feature-box');
+        const grid = el('div', 'wshots');
+        const cards = [];
+        const pick = w => {
+            choice.worldId = w?.id ?? null;
+            for (const c of cards) c.classList.toggle('is-on', c.dataset.id === (w ? String(w.id) : ''));
+            feature.replaceChildren(this.featureOf(w));
+            if (w && w.name !== this.app.showcase.worldName) this.app.showcase.show(w.id);
         };
-        addChip(null, '🎲 Zufall');
-        const start = button('Los!', { className: 'btn big primary block', iconName: 'play' });
+        for (const w of [null, ...list]) {
+            const card = this.worldCard(w, pick);
+            cards.push(card);
+            grid.append(card);
+        }
+
+        // the opponents: up to three computer bunnies in wild looks; a click sets how many
+        const foes = el('div', 'foes');
+        const bots = [0, 1, 2].map(i => randomBotLook(i));
+        const drawFoes = () => {
+            foes.replaceChildren();
+            bots.forEach((look, i) => {
+                const on = i < choice.bots;
+                const b = el('button', `foe${on ? ' is-on' : ''}`, on
+                    ? [portrait(look, { size: 64 }), el('small', null, BOT_NAMES[i])]
+                    : [el('span', 'foe-add', '+'), el('small', null, 'dazu')]);
+                b.type = 'button';
+                b.title = on ? (i === choice.bots - 1 && i > 0 ? 'Diesen Gegner entfernen' : `${i + 1} Gegner`) : `${i + 1} Gegner`;
+                b.onclick = () => {
+                    choice.bots = on && i === choice.bots - 1 && i > 0 ? i : i + 1;
+                    drawFoes();
+                };
+                foes.append(b);
+            });
+        };
+        drawFoes();
+
+        const levels = el('div', 'levels');
+        const levelCards = [['Easy', '🌱', 'Zielt oft daneben'], ['Normal', '🥕', 'Ein fairer Kampf'], ['Hard', '🔥', 'Trifft verdammt gut']].map(([value, emoji, text]) => {
+            const b = el('button', `lvlcard${value === choice.level ? ' is-on' : ''}`, [el('span', 'lvl-emoji', emoji), el('b', null, LEVEL_NAMES[value]), el('small', null, text)]);
+            b.type = 'button';
+            b.onclick = () => {
+                choice.level = value;
+                for (const c of levelCards) c.classList.toggle('is-on', c === b);
+            };
+            levels.append(b);
+            return b;
+        });
+        const crates = segmented(CRATE_RATES.map((label, value) => ({ value, label })), choice.crateRate, v => (choice.crateRate = v));
+
+        const start = button('Los!', { className: 'btn big primary', iconName: 'play' });
         start.onclick = () => busy(start, async () => {
             try {
-                const { token } = await api.post('/api/matches/quick', { worldId: choice.worldId, bots: choice.bots, level: choice.level });
+                const { token } = await api.post('/api/matches/quick', { worldId: choice.worldId, bots: choice.bots, level: choice.level, crateRate: choice.crateRate });
                 this.app.startMatch(token, { quick: { bots: choice.bots, level: choice.level, worldId: choice.worldId } });
             } catch (error) {
                 showError(error);
             }
         });
-        panel.append(
-            this.head('Schnellspiel'),
-            el('p', 'lead', 'Du gegen die Computer-Hasen – sofort, ohne warten.'),
-            el('div', 'settings', [
-                el('div', null, [el('span', 'label', 'Gegner'), bots.element]),
-                el('div', null, [el('span', 'label', 'Stärke'), level.element]),
-                el('div', null, [el('span', 'label', 'Insel'), worldRow]),
+        const panel = el('section', 'panel wide quick', [
+            this.head('Schnellspiel', { extra: [el('span', 'lead-inline', 'Du gegen die Computer-Hasen – sofort, ohne warten.')] }),
+            el('div', 'quick-grid', [
+                el('div', 'quick-main', [
+                    feature,
+                    el('div', 'tile', [el('h3', 'tile-head', [icon('sliders'), document.createTextNode('Stärke')]), levels]),
+                ]),
+                el('div', 'quick-side', [
+                    el('div', 'tile', [el('h3', 'tile-head', [icon('globe-map'), document.createTextNode('Insel')]), grid]),
+                    el('div', 'tile-row', [
+                        el('div', 'tile', [el('h3', 'tile-head', [icon('users'), document.createTextNode('Gegner')]), foes]),
+                        el('div', 'tile', [el('h3', 'tile-head', [icon('box'), document.createTextNode('Kisten')]), crates.element]),
+                    ]),
+                ]),
             ]),
-            el('div', 'panel-foot', [start]));
+            el('div', 'panel-foot', [el('span', 'sub', 'Kisten fallen ab und zu vom Himmel – hinlaufen lohnt sich!'), el('span', 'spacer'), start]),
+        ]);
         this.openPanel('quick', panel);
-        try {
-            this.worldList = await worlds();
-            for (const w of this.worldList) {
-                addChip(w.id, w.name);
-                chips[chips.length - 1].append(sizeBadge(w.width));
-            }
-        } catch (error) {
-            showError(error);
-        }
+        const current = list.find(w => w.name === this.app.showcase.worldName);
+        pick(null);
+        if (current) cards.find(c => c.dataset.id === String(current.id))?.scrollIntoView?.({ block: 'nearest' });
     }
-
     // ------------------------------------------------------------ open matches
 
     showOnline() {
@@ -461,22 +557,19 @@ export class Menu {
             bunnyHealth: 100,
             turnSeconds: settings.defaultTurnSeconds,
             isPublic: true,
+            crateRate: 2,
         };
-        const desc = el('p', 'wdesc');
-        const grid = el('div', 'worlds');
+        const feature = el('div', 'feature-box small');
+        const grid = el('div', 'wshots');
         const cards = [];
         const select = w => {
             choice.worldId = w.id;
             for (const c of cards) c.classList.toggle('is-on', c.dataset.id === String(w.id));
-            desc.textContent = `${w.themeName} · ${String(w.width.toFixed?.(1) ?? w.width).replace('.', ',')} m · Schwerkraft ${String(w.gravity).replace('.', ',')} · ${w.description || ''}`;
+            feature.replaceChildren(this.featureOf(w));
             if (w.name !== this.app.showcase.worldName) this.app.showcase.show(w.id);
         };
         for (const w of list) {
-            const sub = `${(w.themeName ?? themeName(w.theme)) === w.name ? '' : `${w.themeName ?? themeName(w.theme)} · `}${Math.round(w.width)} m${w.gravity < 6 ? ' · wenig Schwerkraft' : ''}`;
-            const c = el('button', 'wcard', [mapCanvas(w.id), sizeBadge(w.width), el('b', null, w.name), el('small', null, sub)]);
-            c.type = 'button';
-            c.dataset.id = String(w.id);
-            c.onclick = () => select(w);
+            const c = this.worldCard(w, select);
             cards.push(c);
             grid.append(c);
         }
@@ -500,17 +593,23 @@ export class Menu {
             }
         });
 
-        const panel = el('section', 'panel wide', [
+        const panel = el('section', 'panel wide create', [
             this.head('Neues Spiel'),
-            el('div', 'grid2', [
-                el('div', null, [el('h3', 'h3', [icon('globe-map'), document.createTextNode('Insel wählen')]), grid, desc]),
-                el('div', 'settings', [
-                    name.row,
-                    el('div', null, [el('span', 'label', 'Teams'), segmented(teamOptions, choice.maxTeams, v => (choice.maxTeams = v)).element]),
-                    el('div', null, [el('span', 'label', 'Hasen pro Team'), segmented([1, 2, 3, 4, 5, 6].map(n => ({ value: n, label: String(n) })), 3, v => (choice.bunniesPerTeam = v)).element]),
-                    el('div', null, [el('span', 'label', 'Leben pro Hase'), segmented([50, 100, 150, 200].map(n => ({ value: n, label: String(n) })), 100, v => (choice.bunnyHealth = v)).element]),
-                    el('div', null, [el('span', 'label', 'Zugzeit'), segmented(turnValues.map(n => ({ value: n, label: `${n} s` })), choice.turnSeconds, v => (choice.turnSeconds = v)).element]),
-                    el('label', 'switch', [pub, el('span', null, 'Öffentlich – unter „Online“ zu finden')]),
+            el('div', 'create-grid', [
+                el('div', 'create-left', [feature, el('div', 'tile', [el('h3', 'tile-head', [icon('globe-map'), document.createTextNode('Insel wählen')]), grid])]),
+                el('div', 'create-right', [
+                    el('div', 'tile', [name.row, el('label', 'switch', [pub, el('span', null, 'Öffentlich – unter „Online“ zu finden')])]),
+                    el('div', 'tile', [
+                        el('h3', 'tile-head', [icon('users'), document.createTextNode('Teams')]),
+                        el('div', 'opt', [el('span', 'label', 'Teams'), segmented(teamOptions, choice.maxTeams, v => (choice.maxTeams = v)).element]),
+                        el('div', 'opt', [el('span', 'label', 'Hasen pro Team'), segmented([1, 2, 3, 4, 5, 6].map(n => ({ value: n, label: String(n) })), 3, v => (choice.bunniesPerTeam = v)).element]),
+                    ]),
+                    el('div', 'tile', [
+                        el('h3', 'tile-head', [icon('sliders'), document.createTextNode('Regeln')]),
+                        el('div', 'opt', [el('span', 'label', 'Leben pro Hase'), segmented([50, 100, 150, 200].map(n => ({ value: n, label: String(n) })), 100, v => (choice.bunnyHealth = v)).element]),
+                        el('div', 'opt', [el('span', 'label', 'Zugzeit'), segmented(turnValues.map(n => ({ value: n, label: `${n} s` })), choice.turnSeconds, v => (choice.turnSeconds = v)).element]),
+                        el('div', 'opt', [el('span', 'label', 'Kisten'), segmented(CRATE_RATES.map((label, value) => ({ value, label })), choice.crateRate, v => (choice.crateRate = v)).element]),
+                    ]),
                 ]),
             ]),
             el('div', 'panel-foot', [el('span', 'sub', 'Freunde holst du mit dem Einladungslink in der Lobby dazu.'), el('span', 'spacer'), open]),
@@ -881,15 +980,18 @@ export class Menu {
         k('Die gepunktete Bahn zeigt, wohin der Schuss fliegt (mit Wind) – das Fadenkreuz, wo er einschlägt; rot = Treffer, blau = Wasser.');
         k('[Leertaste]', ' halten = Kraft laden, loslassen = Feuer');
         k('[1]', '–', '[9]', ' Waffe wählen · Luftschlag: Ziel auf der Insel anklicken');
-        k('[Tab]', ' Zug beenden · ', '[Enter]', ' Chat · ', '[H]', ' Hilfe');
+        k('[Tab]', ' Zug beenden · ', '[Enter]', ' Chat · ', '[H]', ' Hilfe · ', '[V]', ' Vogelperspektive');
+        k('Kisten fallen ab und zu am Fallschirm vom Himmel: hinlaufen! Holzkiste = Waffen, Herzkiste = Leben, Sternkiste = Extras (Panzerfell, Doppel-Wumms, Turbo-Möhre, Hasenloch). Eine Explosion zerstört Kisten – Waffenkisten knallen dabei selbst.');
         const weapons = [
             ['Projectile', 'Karottenwerfer', 'Fliegt weit, treibt im Wind und gräbt beim Aufschlag einen Krater.'],
             ['Grenade', 'Rübengranate', 'Springt über Hügel und explodiert nach ihrem Zünder. Der Wind ist ihr egal.'],
             ['Cluster', 'Kohlkopf-Splitter', 'Platzt beim Aufschlag und verteilt Kohlblätter mit Wumms.'],
             ['Hitscan', 'Löwenzahn-Flinte', 'Mehrere Samenkugeln geradeaus – ideal auf kurze Distanz.'],
-            ['Airstrike', 'Möhrenregen', 'Ziel anklicken, und von oben regnet es Karotten.'],
+            ['Airstrike', 'Möhrenregen', 'Ziel anklicken, und von oben regnet es Karotten. Die Kamera geht dafür in die Vogelperspektive.'],
+            ['Projectile', 'Goldene Riesenmöhre', 'Nur aus Kisten: ein riesiger Krater in Gold.', 'Goldene Riesenmöhre'],
+            ['Teleport', 'Hasenloch', 'Nur aus Kisten: Ziel anklicken – dein Hase buddelt sich ein und taucht dort wieder auf.'],
         ];
-        const cards = el('div', 'guide', weapons.map(([kind, name, text]) => el('div', 'card', [el('h4', null, [weaponIcon(kind), document.createTextNode(name)]), el('p', null, text)])));
+        const cards = el('div', 'guide', weapons.map(([kind, name, text, iconName]) => el('div', 'card', [el('h4', null, [weaponIcon(kind, iconName ?? ''), document.createTextNode(name)]), el('p', null, text)])));
         const rules = el('div', 'card', [
             el('h4', null, [icon('info'), document.createTextNode('So läuft eine Runde')]),
             el('p', null, 'Die Teams sind nacheinander dran, jedes Mal ein anderer Hase. Lauf in Position, ziel, lade die Kraft und feuer. Danach hast du drei Sekunden, um in Deckung zu hoppeln. Wer ins Wasser fällt, ist raus. Das letzte Team mit Hasen gewinnt.'),

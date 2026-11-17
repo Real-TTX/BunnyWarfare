@@ -3,7 +3,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BunnyWarfare.Business;
 
-public sealed record MatchInput(string Name, long WorldId, int MaxTeams, int BunniesPerTeam, int BunnyHealth, int TurnSeconds, bool IsPublic);
+public sealed record MatchInput(string Name, long WorldId, int MaxTeams, int BunniesPerTeam, int BunnyHealth, int TurnSeconds, bool IsPublic,
+    CrateRate CrateRate = CrateRate.Normal);
 
 public sealed record OpenMatchRow(Guid Token, string Name, string WorldName, WorldTheme Theme, string HostName, MatchStatus Status, int MaxTeams, int BunniesPerTeam,
     int TurnSeconds, DateTime CreateDate, bool IsMine);
@@ -31,6 +32,14 @@ public static class MatchLogic
         MatchStatus.Finished => "Beendet",
         MatchStatus.Aborted => "Abgebrochen",
         _ => status.ToString(),
+    };
+
+    public static string CrateRateName(CrateRate rate) => rate switch
+    {
+        CrateRate.Off => "Aus",
+        CrateRate.Rare => "Selten",
+        CrateRate.Often => "Oft",
+        _ => "Normal",
     };
 
     public static async Task<Guid> CreateAsync(AppDbContext db, Actor actor, MatchInput input)
@@ -67,6 +76,11 @@ public static class MatchLogic
             throw new BusinessException("Die Zugzeit liegt zwischen 15 und 120 Sekunden.", nameof(MatchInput.TurnSeconds));
         }
 
+        if (!Enum.IsDefined(input.CrateRate))
+        {
+            throw new BusinessException("Bitte wählen, wie oft Kisten fallen.", nameof(MatchInput.CrateRate));
+        }
+
         var match = new Match
         {
             Name = input.Name.Trim(),
@@ -77,6 +91,7 @@ public static class MatchLogic
             BunnyHealth = input.BunnyHealth,
             TurnSeconds = input.TurnSeconds,
             IsPublic = input.IsPublic,
+            CrateRate = input.CrateRate,
         };
         db.Matches.Add(match);
         await db.ActingAs(actor.AuditId).SaveChangesAsync();

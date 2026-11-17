@@ -60,6 +60,7 @@ public sealed class MatchRoom
         BunniesPerTeam = match.BunniesPerTeam;
         BunnyHealth = match.BunnyHealth;
         TurnSeconds = match.TurnSeconds;
+        CrateRate = match.CrateRate;
         World = world;
     }
 
@@ -80,6 +81,9 @@ public sealed class MatchRoom
     public int BunnyHealth { get; }
 
     public int TurnSeconds { get; }
+
+    /// <summary>How often supply crates fall in this match.</summary>
+    public CrateRate CrateRate { get; }
 
     public World World { get; }
 
@@ -267,6 +271,7 @@ public sealed class MatchRoom
         var game = new GameState
         {
             Terrain = terrain, Gravity = World.Gravity, MaxWind = World.MaxWind, Theme = World.Theme, WorldName = World.Name, TurnSeconds = TurnSeconds, Random = random,
+            CrateRate = CrateRate, BunnyHealth = BunnyHealth,
         };
         foreach (var w in weapons)
         {
@@ -282,7 +287,8 @@ public sealed class MatchRoom
                 Index = slot.TeamIndex, Name = slot.TeamName, Color = slot.Color, PlayerId = slot.PlayerId, IsBot = slot.IsBot, BotLevel = slot.BotLevel,
                 Look = slot.Look, Progress = slot.Progress, Level = slot.Level,
             };
-            foreach (var w in game.Weapons.Where(w => w.Ammo > 0))
+            // limited weapons; the ones with 0 shots come only from supply crates
+            foreach (var w in game.Weapons.Where(w => w.Ammo >= 0))
             {
                 team.Ammo[w.Id] = w.Ammo;
             }
@@ -393,7 +399,18 @@ public sealed class MatchRoom
         bunny.Yaw = double.IsFinite(yaw) ? yaw : bunny.Yaw;
         game.Stamina = Math.Max(0, game.Stamina - distance);
         LastActivity = DateTime.UtcNow;
-        return [new Outgoing("Moved", new MovedDto(bunny.Id, bunny.Position.X, bunny.Position.Y, bunny.Position.Z, bunny.Yaw, game.Stamina, false))];
+        var outgoing = new List<Outgoing>();
+        // a crate under the feet: taken for the team (a turbo crate adds stamina, so the Moved message comes after it)
+        var picked = Crates.PickUp(game, bunny);
+        outgoing.Add(new Outgoing("Moved", new MovedDto(bunny.Id, bunny.Position.X, bunny.Position.Y, bunny.Position.Z, bunny.Yaw, game.Stamina, false)));
+        foreach (var (crate, text) in picked)
+        {
+            var team = game.Teams.First(t => t.Index == bunny.TeamIndex);
+            outgoing.Add(new Outgoing("CratePicked", new CratePickedDto(crate.Id, bunny.Id, team.Index, crate.Look, text, TeamDtoOf(team), BunnyOf(bunny), Math.Round(game.Stamina, 2)),
+                ToAll: true));
+        }
+
+        return outgoing;
     }
 
     public List<Outgoing> AimAt(long playerId, double yaw, double pitch, long weaponId)
@@ -430,6 +447,10 @@ public sealed class MatchRoom
             TargetX = Math.Clamp(aim.TargetX, 0, game.Terrain.Width),
             TargetZ = Math.Clamp(aim.TargetZ, 0, game.Terrain.Width),
         };
+        if (weapon.Kind == WeaponKind.Teleport && !Simulation.CanTeleport(game, bunny, aim.TargetX, aim.TargetZ))
+        {
+            throw new BusinessException("Da kann der Hase nicht hin.");
+        }
         LastActivity = DateTime.UtcNow;
         return Shoot(team, bunny, weapon, clamped, now);
     }
@@ -437,7 +458,7 @@ public sealed class MatchRoom
     private List<Outgoing> Shoot(TeamState team, BunnyState bunny, WeaponState weapon, Aim aim, DateTime now)
     {
         var game = Game!;
-        bunny.Yaw = weapon.Kind == WeaponKind.Airstrike ? bunny.Yaw : aim.Yaw;
+        bunny.Yaw = weapon.Kind is WeaponKind.Airstrike or WeaponKind.Teleport ? bunny.Yaw : aim.Yaw;
         if (team.Ammo.TryGetValue(weapon.Id, out var left))
         {
             team.Ammo[weapon.Id] = left - 1;
@@ -606,13 +627,26 @@ public sealed class MatchRoom
         var angle = game.Random.NextDouble() * Math.PI * 2;
         var strength = game.MaxWind * Math.Pow(game.Random.NextDouble(), 1.3);
         game.Wind = new V3(Math.Sin(angle) * strength, 0, Math.Cos(angle) * strength);
+        if (next.TurboPending)
+        {
+            game.Stamina += Crates.TurboStamina;
+            next.TurboPending = false;
+        }
+
         game.BotActAt = next.IsBot ? now.AddSeconds(BotThinkSeconds) : null;
         if (announce)
         {
             outgoing.Add(System($"{next.Name}: {bunny.Name} ist dran."));
         }
 
+        // maybe a supply crate falls (it is in the Turn message already; CrateDrop lets the browsers animate the fall)
+        var crate = Crates.TryDrop(game);
         outgoing.Add(new Outgoing("Turn", TurnUpdate(now)));
+        if (crate is not null)
+        {
+            outgoing.Add(System("Eine Kiste fällt vom Himmel!"));
+            outgoing.Add(new Outgoing("CrateDrop", new CrateDropDto(CrateOf(crate))));
+        }
     }
 
     private void EndGame(TeamState? winner, List<Outgoing> outgoing)
@@ -706,14 +740,18 @@ public sealed class MatchRoom
             var world = new WorldDto(g.WorldName, g.Terrain.Size, Terrain.CellSize, g.Theme.ToString(), g.Terrain.WaterLevel, g.Gravity, g.MaxWind, g.Terrain.ToBase64());
             var weapons = g.Weapons.Select(w => new WeaponDto(w.Id, w.Name, w.Kind.ToString(), w.Damage, w.BlastRadius, w.AffectedByWind, w.FuseSeconds, w.ClusterCount,
                 w.Pellets, w.Ammo)).ToList();
-            game = new GameDto(world, Teams(), Bunnies(), weapons, Turn(now));
+            game = new GameDto(world, Teams(), Bunnies(), weapons, Turn(now), CratesOf(g));
         }
 
         return new RoomDto(Token.ToString(), Name, Status.ToString(), HostPlayerId, World.Name, World.Theme.ToString(), MaxTeams, BunniesPerTeam, BunnyHealth, TurnSeconds,
-            slots, game, Result);
+            slots, game, Result, (int)CrateRate, MatchLogic.CrateRateName(CrateRate));
     }
 
-    private TurnUpdateDto TurnUpdate(DateTime now) => new(Turn(now), Bunnies(), Teams());
+    private TurnUpdateDto TurnUpdate(DateTime now) => new(Turn(now), Bunnies(), Teams(), CratesOf(Game!));
+
+    private static List<CrateDto> CratesOf(GameState game) => game.Crates.Select(CrateOf).ToList();
+
+    private static CrateDto CrateOf(CrateState c) => new(c.Id, Math.Round(c.Position.X, 3), Math.Round(c.Position.Y, 3), Math.Round(c.Position.Z, 3), c.Look);
 
     private TurnDto Turn(DateTime now)
     {
@@ -724,14 +762,18 @@ public sealed class MatchRoom
             Math.Round(g.Stamina, 2), MaxStamina);
     }
 
-    private List<BunnyDto> Bunnies()
-        => Game!.Bunnies.Select(b => new BunnyDto(b.Id, b.TeamIndex, b.Name, Math.Round(b.Position.X, 3), Math.Round(b.Position.Y, 3), Math.Round(b.Position.Z, 3),
-            Math.Round(b.Yaw, 3), b.Health, BunnyHealth)).ToList();
+    private List<BunnyDto> Bunnies() => Game!.Bunnies.Select(BunnyOf).ToList();
 
-    private List<TeamDto> Teams()
-        => Game!.Teams.Select(t => new TeamDto(t.Index, t.Name, t.Color, t.PlayerId, t.IsBot,
+    private BunnyDto BunnyOf(BunnyState b)
+        => new(b.Id, b.TeamIndex, b.Name, Math.Round(b.Position.X, 3), Math.Round(b.Position.Y, 3), Math.Round(b.Position.Z, 3), Math.Round(b.Yaw, 3), b.Health, BunnyHealth,
+            b.Shield);
+
+    private List<TeamDto> Teams() => Game!.Teams.Select(TeamDtoOf).ToList();
+
+    private TeamDto TeamDtoOf(TeamState t)
+        => new(t.Index, t.Name, t.Color, t.PlayerId, t.IsBot,
             t.Ammo.ToDictionary(a => a.Key.ToString(global::System.Globalization.CultureInfo.InvariantCulture), a => a.Value),
-            t.Surrendered || !Game.TeamAlive(t.Index), t.Kills, t.DamageDealt, t.Look.Fur, t.Look.Outfit, t.Look.Face, t.Look.Frame, t.Level)).ToList();
+            t.Surrendered || !Game!.TeamAlive(t.Index), t.Kills, t.DamageDealt, t.Look.Fur, t.Look.Outfit, t.Look.Face, t.Look.Frame, t.Level, t.Effects);
 
     private sealed class Releaser(SemaphoreSlim gate) : IDisposable
     {

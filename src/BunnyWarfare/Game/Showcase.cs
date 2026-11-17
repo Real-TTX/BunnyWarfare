@@ -30,7 +30,7 @@ public static class Showcase
         {
             // the decorative teams show off the wardrobe (wild things included)
             var look = Business.Cosmetics.RandomLook(random, 0.5);
-            teamDtos.Add(new TeamDto(t, Teams[t].Name, Teams[t].Color, null, true, new Dictionary<string, int>(), false, 0, 0, look.Fur, look.Outfit, look.Face, look.Frame, 0));
+            teamDtos.Add(new TeamDto(t, Teams[t].Name, Teams[t].Color, null, true, new Dictionary<string, int>(), false, 0, 0, look.Fur, look.Outfit, look.Face, look.Frame, 0, []));
             for (var k = 0; k < bunniesPerTeam; k++)
             {
                 var spot = MatchRoom.FindSpot(game, random);

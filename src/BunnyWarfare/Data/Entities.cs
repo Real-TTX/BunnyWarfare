@@ -134,6 +134,18 @@ public enum WeaponKind : short
 
     /// <summary>Drops a row of bombs from the sky onto a target.</summary>
     Airstrike = 4,
+
+    /// <summary>The bunny of the turn digs in and pops out at a target on the island (no damage).</summary>
+    Teleport = 5,
+}
+
+/// <summary>How often supply crates fall from the sky in a match.</summary>
+public enum CrateRate : short
+{
+    Off = 0,
+    Rare = 1,
+    Normal = 2,
+    Often = 3,
 }
 
 public sealed class Weapon : SoftDeleteEntity
@@ -203,6 +215,9 @@ public sealed class Match : Entity
     public int BunnyHealth { get; set; } = 100;
 
     public int TurnSeconds { get; set; } = 45;
+
+    /// <summary>How often supply crates drop (weapons, health, support).</summary>
+    public CrateRate CrateRate { get; set; } = CrateRate.Normal;
 
     public DateTime? StartDate { get; set; }
 

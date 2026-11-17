@@ -31,6 +31,9 @@ public sealed class BunnyState
 
     public int Health { get; set; }
 
+    /// <summary>Hits the "Panzerfell" of a supply crate still halves (0 = no shield).</summary>
+    public int Shield { get; set; }
+
     public bool Alive => Health > 0;
 
     /// <summary>The middle of the body: what explosions measure to and projectiles hit.</summary>
@@ -102,6 +105,51 @@ public sealed class TeamState
     public int? EliminatedAtTurn { get; set; }
 
     public bool Surrendered { get; set; }
+
+    /// <summary>"Doppel-Wumms" from a crate: the next shot of the team does double damage.</summary>
+    public bool DoubleDamage { get; set; }
+
+    /// <summary>"Turbo-Möhre" from a crate picked outside the team's turn: more stamina at the start of its next turn.</summary>
+    public bool TurboPending { get; set; }
+
+    /// <summary>The effects the browsers show on the team ("double", "turbo").</summary>
+    public IReadOnlyList<string> Effects
+    {
+        get
+        {
+            var effects = new List<string>();
+            if (DoubleDamage)
+            {
+                effects.Add("double");
+            }
+
+            if (TurboPending)
+            {
+                effects.Add("turbo");
+            }
+
+            return effects;
+        }
+    }
+}
+
+/// <summary>A supply crate on the island. Its look is public, its content is a secret until a bunny picks it up.</summary>
+public sealed class CrateState
+{
+    public required int Id { get; init; }
+
+    /// <summary>The bottom of the crate (on the ground).</summary>
+    public V3 Position { get; set; }
+
+    /// <summary>"weapon", "health" or "support".</summary>
+    public required string Look { get; init; }
+
+    /// <summary>"ammo", "health", "shield", "double", "turbo" (the Hasenloch is "ammo" of the teleport weapon).</summary>
+    public required string Content { get; init; }
+
+    public long? WeaponId { get; init; }
+
+    public int Amount { get; init; }
 }
 
 /// <summary>The state of a running match. Only touched under the lock of its <see cref="MatchRoom"/>.</summary>
@@ -146,6 +194,19 @@ public sealed class GameState
     public DateTime? BotActAt { get; set; }
 
     public int? WinnerTeam { get; set; }
+
+    /// <summary>How often crates drop (off in tests unless set).</summary>
+    public CrateRate CrateRate { get; init; } = CrateRate.Off;
+
+    /// <summary>The full health of a bunny (a health crate heals up to it).</summary>
+    public int BunnyHealth { get; init; } = 100;
+
+    public List<CrateState> Crates { get; } = [];
+
+    public int NextCrateId { get; set; } = 1;
+
+    /// <summary>The turn the last crate dropped (the start counts as one).</summary>
+    public int LastCrateTurn { get; set; } = 1;
 
     public BunnyState? CurrentBunny => Bunnies.FirstOrDefault(b => b.Id == CurrentBunnyId);
 

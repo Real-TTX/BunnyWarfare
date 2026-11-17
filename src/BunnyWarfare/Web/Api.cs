@@ -18,7 +18,7 @@ public static class Api
 
     public sealed record RegisterRequest(string? DisplayName, string? LoginName, string? Password);
 
-    public sealed record CreateMatchRequest(string? Name, long WorldId, int MaxTeams, int BunniesPerTeam, int BunnyHealth, int TurnSeconds, bool IsPublic);
+    public sealed record CreateMatchRequest(string? Name, long WorldId, int MaxTeams, int BunniesPerTeam, int BunnyHealth, int TurnSeconds, bool IsPublic, int? CrateRate = null);
 
     public sealed record QuickMatchRequest(long? WorldId, int Bots = 1, string? Level = null);
 
@@ -114,7 +114,8 @@ public static class Api
         api.MapPost("/matches", async (CreateMatchRequest body, HttpContext http, AppDbContext db) =>
         {
             var token = await MatchLogic.CreateAsync(db, Me(http),
-                new MatchInput(body.Name ?? string.Empty, body.WorldId, body.MaxTeams, body.BunniesPerTeam, body.BunnyHealth, body.TurnSeconds, body.IsPublic));
+                new MatchInput(body.Name ?? string.Empty, body.WorldId, body.MaxTeams, body.BunniesPerTeam, body.BunnyHealth, body.TurnSeconds, body.IsPublic,
+                    (CrateRate)(body.CrateRate ?? (int)CrateRate.Normal)));
             return Results.Ok(new { token });
         });
         api.MapPost("/matches/quick", async (QuickMatchRequest body, HttpContext http, AppDbContext db) =>
@@ -131,7 +132,7 @@ public static class Api
             var bots = Math.Clamp(body.Bots, 1, Math.Max(1, settings.MaxTeamsPerMatch - 1));
             var name = $"Schnellspiel von {me.DisplayName}";
             var token = await MatchLogic.CreateAsync(db, me,
-                new MatchInput(name.Length > 60 ? name[..60] : name, world.Id, bots + 1, 3, 100, settings.DefaultTurnSeconds, false));
+                new MatchInput(name.Length > 60 ? name[..60] : name, world.Id, bots + 1, 3, 100, settings.DefaultTurnSeconds, false, CrateRate.Normal));
             return Results.Ok(new { token });
         });
 

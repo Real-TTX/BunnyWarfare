@@ -18,6 +18,9 @@ const MOVE_INTERVAL = 100;     // ms between Move messages
 const AIM_INTERVAL = 200;      // ms between AimAt messages
 
 const r3 = v => Math.round(v * 1000) / 1000;
+/** Weapons that are aimed by a click on the island (not by angle and power). */
+const isTargetWeapon = kind => kind === 'Airstrike' || kind === 'Teleport';
+const CRATE_QUIPS = ['Meins!', 'Juhu, eine Kiste!', 'Geschenk!', 'Ohh, was ist da drin?', 'Danke, Himmel!'];
 
 /** The message of a HubException (without the text SignalR puts before it). */
 function errorText(error) {
@@ -37,7 +40,12 @@ export class Match {
         this.token = null;
         this.hub = null;
         this.active = false;
+        this.hover = null;
         this.reset();
+        // where the pointer is over the island: the airstrike and the Hasenloch show their target there before the click
+        const canvas = this.stage.renderer.domElement;
+        canvas.addEventListener('pointermove', e => { this.hover = { x: e.clientX, y: e.clientY }; });
+        canvas.addEventListener('pointerleave', () => { this.hover = null; });
     }
 
     reset() {
@@ -58,6 +66,8 @@ export class Match {
             chargeStart: 0,
             awaitingShot: false,
             airTarget: null,
+            hoverTarget: null,
+            birdManual: false,
             lastPower: {},
             pitchHold: 0,
             yawHold: 0,
@@ -103,6 +113,8 @@ export class Match {
         hub.on('Aim', aim => { this.onAim(aim); });
         hub.on('Shot', shot => { this.onShot(shot); });
         hub.on('Chat', message => { this.hud.chat(message); });
+        hub.on('CrateDrop', drop => { this.onCrateDrop(drop); });
+        hub.on('CratePicked', picked => { this.onCratePicked(picked); });
         hub.on('GameOver', result => {
             if (this.state.playback) this.state.pendingOver = result;
             else this.showOver(result);
@@ -147,6 +159,8 @@ export class Match {
         this.stage.rig.manualZoom = false;
         this.stage.rig.manualPitch = false;
         this.stage.rig.autoPitch = 0;
+        this.stage.rig.override = null;
+        this.hud.birdsEye?.(false);
         this.stage.setCenterShift(0);
         if (hub) await hub.stop().catch(() => {});
     }
@@ -231,7 +245,7 @@ export class Match {
         state.gravity = game.world.gravity;
         state.lastTurnNumber = -1;
         this.hud.resetWeapons();
-        this.applyTurn({ turn: game.turn, bunnies: game.bunnies, teams: game.teams });
+        this.applyTurn({ turn: game.turn, bunnies: game.bunnies, teams: game.teams, crates: game.crates });
         this.stage.rig.distance = 10;
         this.stage.rig.pitch = 0.42;
         this.stage.rig.focus(this.focusPoint(), true);
@@ -258,6 +272,7 @@ export class Match {
         world.setTeams(update.teams);
         world.setBunnies(update.bunnies);
         world.setWind?.(turn.windX, turn.windZ);
+        if (Array.isArray(update.crates)) world.crates?.sync(update.crates);
         state.myTeam = update.teams.find(t => t.playerId === this.ctx.me()) ?? null;
         const bunny = this.currentBunny();
         world.marker.attach(turn.phase === 'Over' ? null : bunny);
@@ -348,7 +363,7 @@ export class Match {
         // the others see the direction (the first moment of the flight), not where it lands: they don't know the power
         const start = this.predict(b, weapon, a.yaw, a.pitch, 0.55)?.paths[0]?.points.slice(0, 16);
         b.setAim(start ?? null);
-        if (start && weapon.kind !== 'Airstrike') this.guide?.show({ paths: [{ points: start }], impacts: [] }, this.teamOf(b.team)?.color, { impacts: false });
+        if (start && !isTargetWeapon(weapon.kind)) this.guide?.show({ paths: [{ points: start }], impacts: [] }, this.teamOf(b.team)?.color, { impacts: false });
         else this.guide?.hide();
     }
 
@@ -382,8 +397,84 @@ export class Match {
                 this.sound.splash();
             },
             ray: (from, to) => world.effects.ray(from, to),
+            crate: e => this.onShotCrate(e),
+            teleport: (e, phase) => {
+                // dirt flies where the bunny digs in and where it pops out
+                const at = new THREE.Vector3(...(phase === 'out' ? e.from : e.to)).add(new THREE.Vector3(0, 0.1, 0));
+                world.particles.emit(at, { count: 22, speed: 2.6, up: 3.5, colors: [0x8a6a44, 0x6e5232, 0xa5835a], life: 1, gravity: 0.9, size: 0.14, drag: 1 });
+                world.particles.emit(at, { count: 10, speed: 1.4, up: 0.4, colors: [0xd9cbb2, 0xc4b496], life: 0.9, gravity: 0, size: 0.45, grow: 2, drag: 2.5, ring: true });
+                this.sound.tick();
+            },
         });
         this.refreshHud(true);
+    }
+
+    // ---------------------------------------------------------------- supply crates
+
+    /** A crate falls on its parachute (the Turn before it already listed it). */
+    onCrateDrop(drop) {
+        const crate = drop?.crate ?? drop;
+        if (!crate || !this.state.world) return;
+        this.state.world.crates?.drop(crate);
+        this.sound.ping?.();
+    }
+
+    /** A bunny walked onto a crate: it opens, the team gets what was in it at once (ammo, effects), the bunny its health or shield. */
+    onCratePicked(p) {
+        const s = this.state;
+        const world = s.world;
+        if (!world) return;
+        const at = world.crates?.positionOf(p.crateId) ?? world.bunnies.get(p.bunnyId)?.position ?? null;
+        world.crates?.pick(p.crateId);
+        if (p.teamState) {
+            s.teams = s.teams.map(t => (t.index === p.teamState.index ? p.teamState : t));
+            world.setTeams([p.teamState]);
+            if (s.myTeam && s.myTeam.index === p.teamState.index) s.myTeam = p.teamState;
+        }
+        const bunny = world.bunnies.get(p.bunnyId);
+        if (bunny && p.bunny) {
+            bunny.setHealth(p.bunny.health);
+            bunny.setShield?.(p.bunny.shield ?? 0);
+        }
+        // a Turbo-Möhre during the team's own turn: more metres to walk (may go beyond the usual maximum; the bar is clamped)
+        if (typeof p.stamina === 'number' && s.turn && p.team === s.turn.team) s.stamina = p.stamina;
+        this.crateNews(p.text, p.look, p.bunnyId, at);
+        this.ensureWeapon();
+        this.refreshHud(true);
+    }
+
+    /** What happened to a crate during a shot (destroyed by a blast, picked by a bunny that was blown onto it, moved, sunk). */
+    onShotCrate(e) {
+        const crates = this.state.world?.crates;
+        if (!crates) return;
+        switch (e.action) {
+            case 'destroyed':
+                crates.destroy(e.crateId);
+                break;
+            case 'picked': {
+                const at = crates.positionOf(e.crateId);
+                crates.pick(e.crateId);
+                this.crateNews(e.text, e.look, e.bunnyId, at);
+                break;
+            }
+            case 'moved':
+                crates.move(e.crateId, e.y);
+                break;
+            case 'sunk':
+                crates.sink(e.crateId);
+                break;
+        }
+    }
+
+    /** The news of a crate: a floater above it, a line in the chat, a happy bunny. */
+    crateNews(text, look, bunnyId, at) {
+        const world = this.state.world;
+        const bunny = world?.bunnies.get(bunnyId);
+        const where = at ?? bunny?.position;
+        if (text && where) this.floaters.add(where, text, look === 'health' ? 'heal' : 'crate');
+        if (text) this.hud.chat({ name: '', color: '', text: `${bunny?.name ?? 'Ein Hase'} öffnet eine Kiste: ${text}`, system: true });
+        bunny?.say?.(CRATE_QUIPS[Math.floor(Math.random() * CRATE_QUIPS.length)], 1.6);
+        this.sound.ping?.();
     }
 
     playbackFinished() {
@@ -425,7 +516,7 @@ export class Match {
     // ---------------------------------------------------------------- aiming and firing
 
     /** Where a shot of <bunny> would go (aim.js flies it like the server: gravity, wind of the turn, bounces, bunnies in the way). */
-    predict(bunny, weapon, yaw, pitch, power) {
+    predict(bunny, weapon, yaw, pitch, power, target = this.state.airTarget) {
         const s = this.state;
         if (!s.world || !weapon) return null;
         const turn = s.turn;
@@ -434,7 +525,7 @@ export class Match {
             bunnies: s.world.bunnies.values(),
             wind: new THREE.Vector2(turn?.windX ?? 0, turn?.windZ ?? 0),
             gravity: s.gravity,
-            target: s.airTarget,
+            target,
         }, bunny, weapon, yaw, pitch, power);
     }
 
@@ -448,7 +539,7 @@ export class Match {
         if (!this.canAim()) return;
         const weapon = this.selectedWeapon();
         if (!weapon) return;
-        if (weapon.kind === 'Airstrike' || weapon.kind === 'Hitscan') {
+        if (isTargetWeapon(weapon.kind) || weapon.kind === 'Hitscan') {
             this.fire(1);
             return;
         }
@@ -471,16 +562,20 @@ export class Match {
             return;
         }
         let tx = 0, tz = 0;
-        if (weapon.kind === 'Airstrike') {
+        if (isTargetWeapon(weapon.kind)) {
             if (!s.airTarget) {
                 toast('Erst ein Ziel auf der Insel anklicken.', 'info');
+                return;
+            }
+            if (weapon.kind === 'Teleport' && this.predict(this.currentBunny(), weapon, 0, 0, 1)?.blocked) {
+                toast('Da kann der Hase nicht hin.', 'info');
                 return;
             }
             tx = s.airTarget.x;
             tz = s.airTarget.z;
         }
         s.awaitingShot = true;
-        if (weapon.kind !== 'Airstrike' && weapon.kind !== 'Hitscan') s.lastPower[weapon.id] = Math.max(0.05, power);
+        if (!isTargetWeapon(weapon.kind) && weapon.kind !== 'Hitscan') s.lastPower[weapon.id] = Math.max(0.05, power);
         try {
             await this.call('Fire', weapon.id, r3(this.stage.rig.yaw), r3(s.pitch), r3(Math.max(0.05, power)), r3(tx), r3(tz));
         } catch {
@@ -495,7 +590,9 @@ export class Match {
         s.weaponId = id;
         s.charging = false;
         s.power = 0;
+        if (!isTargetWeapon(weapon.kind)) s.airTarget = null;
         if (weapon.kind === 'Airstrike' && this.isMine()) toast('Luftschlag: Ziel auf der Insel anklicken, dann Feuer.', 'info');
+        if (weapon.kind === 'Teleport' && this.isMine()) toast('Hasenloch: Ziel auf der Insel anklicken, dann Buddeln.', 'info');
         this.equip();
         this.refreshHud(true);
     }
@@ -528,7 +625,7 @@ export class Match {
         const s = this.state;
         const world = s.world;
         const weapon = this.selectedWeapon();
-        if (!world || !this.canAim() || weapon?.kind !== 'Airstrike') return;
+        if (!world || !this.canAim() || !isTargetWeapon(weapon?.kind)) return;
         const point = this.groundUnder(clientX, clientY);
         if (!point) return;
         s.airTarget = point;
@@ -629,9 +726,14 @@ export class Match {
             $('bw-help').hidden = !$('bw-help').hidden;
             return true;
         }
+        if (code === 'KeyV') {
+            this.toggleBird();
+            return true;
+        }
         if (code === 'Escape') {
             $('bw-help').hidden = true;
             $('bw-dropdown').hidden = true;
+            if (this.state.birdManual) this.toggleBird(false);
             return true;
         }
         return ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code);
@@ -662,6 +764,14 @@ export class Match {
         return true;
     }
 
+    /** The bird's-eye view over the whole island (V or the HUD button; the airstrike and the Hasenloch switch it on by themselves). */
+    toggleBird(on = !this.state.birdManual) {
+        this.state.birdManual = on;
+        this.stage.rig.overrideZoom = 1;
+        this.stage.rig.overridePitch = null;
+        this.sound.tick?.();
+    }
+
     skip() {
         this.call('SkipTurn').catch(() => {});
     }
@@ -681,6 +791,19 @@ export class Match {
         if (bunny) return bunny.position.clone().add(new THREE.Vector3(0, 0.9, 0));
         const w = this.state.world?.width ?? 20;
         return new THREE.Vector3(w / 2, 2, w / 2);
+    }
+
+    /** The arrow of an airstrike: along the drop line over the target (the flight direction = where the camera looks). */
+    airstrikeArrow(weapon, target) {
+        const world = this.state.world;
+        const yaw = this.stage.rig.yaw;
+        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const half = ((Math.max(1, weapon.count || 1) - 1) / 2) * 1.7;
+        const from = target.clone().addScaledVector(forward, -(half + 3.5));
+        const to = target.clone().addScaledVector(forward, half + 3);
+        // just above the target (it draws through hills): high up it would look huge from the bird's-eye view
+        from.y = to.y = Math.max(target.y, world.data.waterLevel) + 0.6;
+        return [from, to];
     }
 
     /** Where the aim camera looks and how far it stays back so that the bunny and the impact <end> are both in the picture. */
@@ -742,9 +865,9 @@ export class Match {
         hud.stamina(s.stamina, turn.maxStamina, mine);
         hud.power(s.power, s.charging);
         const weapon = this.selectedWeapon();
-        const aimText = weapon?.kind === 'Airstrike' ? (s.airTarget ? 'Ziel gesetzt' : 'Ziel anklicken') : weapon?.kind === 'Hitscan' ? `Winkel ${Math.round(s.pitch * 180 / Math.PI)}°` : `Winkel ${Math.round(s.pitch * 180 / Math.PI)}° · Kraft ${Math.round(this.guidePower() * 100)} %`;
+        const aimText = isTargetWeapon(weapon?.kind) ? (s.airTarget ? 'Ziel gesetzt' : 'Ziel anklicken') : weapon?.kind === 'Hitscan' ? `Winkel ${Math.round(s.pitch * 180 / Math.PI)}°` : `Winkel ${Math.round(s.pitch * 180 / Math.PI)}° · Kraft ${Math.round(this.guidePower() * 100)} %`;
         hud.aimInfo(`${weapon?.name ?? '–'} · ${aimText}`);
-        hud.controls(this.canAim(), mine, weapon?.kind === 'Airstrike' || weapon?.kind === 'Hitscan' ? 'Feuer' : 'Feuer (halten)');
+        hud.controls(this.canAim(), mine, weapon?.kind === 'Teleport' ? 'Buddeln!' : weapon?.kind === 'Airstrike' || weapon?.kind === 'Hitscan' ? 'Feuer' : 'Feuer (halten)');
         if (full) {
             hud.teams(s.teams, world.bunnies.values(), turn.team);
             hud.weapons(s.weapons, s.myTeam, s.weaponId, !!s.myTeam && !s.result, id => this.selectWeapon(id));
@@ -784,13 +907,17 @@ export class Match {
             if (!moving) bunny.goalYaw = stage.rig.yaw;
             bunny.setAimPitch?.(s.pitch);
             const weapon = this.selectedWeapon();
-            const prediction = this.predict(bunny, weapon, stage.rig.yaw, s.pitch, this.guidePower());
-            bunny.setAim(weapon?.kind === 'Airstrike' ? null : prediction?.paths[0]?.points ?? null);
+            const targeting = isTargetWeapon(weapon?.kind);
+            // a target weapon shows its target under the pointer until the click places it
+            s.hoverTarget = targeting && !s.airTarget && this.hover ? this.groundUnder(this.hover.x, this.hover.y) : null;
+            const prediction = this.predict(bunny, weapon, stage.rig.yaw, s.pitch, this.guidePower(), s.airTarget ?? s.hoverTarget);
+            bunny.setAim(targeting ? null : prediction?.paths[0]?.points ?? null);
             this.guide?.show(prediction, this.state.myTeam?.color, { data: world.data, dots: weapon?.kind !== 'Airstrike' });
+            this.guide?.showArrow(...(weapon?.kind === 'Airstrike' && (s.airTarget ?? s.hoverTarget) ? this.airstrikeArrow(weapon, s.airTarget ?? s.hoverTarget) : [null, null]), this.state.myTeam?.color);
             // the aim camera: it moves between the bunny and the impact and backs off until both are in view (also while walking: no swing when the bunny stops)
             // (frozen while charging, so the picture holds still; the zoom of the player wins)
             if (!s.charging) {
-                const end = weapon?.kind === 'Airstrike' ? null : prediction?.impacts[0]?.point ?? prediction?.paths[0]?.end;
+                const end = targeting ? null : prediction?.impacts[0]?.point ?? prediction?.paths[0]?.end;
                 s.aimView = end ? this.aimView(bunny, end) : null;
             }
             const a = s.lastAim;
@@ -805,19 +932,29 @@ export class Match {
                 this.guide?.hide();
             }
         }
+        // the bird's-eye view: by hand (V), or by itself while a target weapon (airstrike, Hasenloch) is aimed
+        const bird = s.birdManual || (this.canAim() && isTargetWeapon(this.selectedWeapon()?.kind));
+        if (bird) {
+            s.aimView = null;
+            stage.rig.override = { distance: Math.min(120, Math.max(24, world.width * 1.3)) * (stage.rig.overrideZoom ?? 1), pitch: stage.rig.overridePitch ?? 1.32 };
+        } else {
+            stage.rig.override = null;
+        }
+        this.hud.birdsEye?.(bird);
         stage.rig.autoDistance = s.aimView ? s.aimView.distance + (s.aimExtra ?? 0) : 0;
         stage.rig.autoPitch = s.aimView ? 0.62 : 0;
         this.guide?.update(dt, stage.camera);
         // the camera keeps up tightly while the own bunny walks, elsewhere it glides
         stage.rig.followRate = this.walking ? 10 : 6;
 
+        const center = bird ? new THREE.Vector3(world.width / 2, world.data.waterLevel + 1, world.width / 2) : null;
         if (s.playback) {
             // late messages waiting: catch up faster
             s.playback.update(s.pendingTurns.length > 0 ? dt * 2.5 : dt);
-            stage.rig.focus(s.playback.focus ?? this.focusPoint());
+            stage.rig.focus(center ?? s.playback.focus ?? this.focusPoint());
             if (s.playback.done) this.playbackFinished();
         } else {
-            stage.rig.focus(s.aimView?.focus ?? this.focusPoint());
+            stage.rig.focus(center ?? s.aimView?.focus ?? this.focusPoint());
         }
 
         world.update(dt, now / 1000);

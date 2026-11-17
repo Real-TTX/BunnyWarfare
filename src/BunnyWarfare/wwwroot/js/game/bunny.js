@@ -26,6 +26,8 @@
 //                                   now and then when it is hit, flies, fires, sneezes or is knocked out
 //   attachFx(particles)             where the dust of the hops and the bubbles go (default: the Particles created last)
 //   showLabel(visible)              the name and health above the head (the menu hides them)
+//   setShield(hits)                 a soft bubble around the bunny while it has a shield (hits left > 0; a crate's "Panzerfell")
+//   digIn() · popOut()              the Hasenloch: the bunny disappears into the ground / pops out of it (playback moves it in between)
 // TurnMarker: new TurnMarker() · .mesh · attach(bunny | null) · update(dt)
 import * as THREE from 'three';
 import { paint, merge, sphere, fluffySphere, limb, softRing } from './fx/shapes.js';
@@ -405,7 +407,7 @@ const pick = list => list[Math.floor(Math.random() * list.length)];
 
 // ---------------------------------------------------------------- animation helpers
 
-const KINDS = ['Projectile', 'Grenade', 'Cluster', 'Hitscan', 'Airstrike'];
+const KINDS = ['Projectile', 'Grenade', 'Cluster', 'Hitscan', 'Airstrike', 'Teleport'];
 const LOOPS = new Set(['idle', 'walk', 'aim', 'cheer', 'dance', 'wave', 'eat']);
 const ONCE = { fire: 0.55, hurt: 0.6 };
 const FIDGETS = ['yawn', 'scratch', 'hiccup', 'lookcam', 'lookcam', 'polish', 'sneeze', 'raspberry', 'stretch'];
@@ -470,6 +472,32 @@ class PupilSpring {
 }
 
 /** A bunny of a team. Its root stands with the feet at y = 0 and looks along +z (turned by yaw). */
+// the bubble of a shield: a soft rim (fresnel) and a faint shimmer, shared by all bunnies
+const shieldGeometry = new THREE.SphereGeometry(0.82, 24, 16);
+shieldGeometry.scale(1, 1.12, 1);
+const shieldMaterial = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uColor: { value: new THREE.Color(0x8fd8ff) } },
+    vertexShader: /* glsl */ `
+        varying vec3 vNormal; varying vec3 vView; varying vec3 vPos;
+        void main() {
+            vec4 world = modelMatrix * vec4(position, 1.0);
+            vNormal = normalize(mat3(modelMatrix) * normal);
+            vView = normalize(cameraPosition - world.xyz);
+            vPos = position;
+            gl_Position = projectionMatrix * viewMatrix * world;
+        }`,
+    fragmentShader: /* glsl */ `
+        uniform vec3 uColor; varying vec3 vNormal; varying vec3 vView; varying vec3 vPos;
+        void main() {
+            float rim = pow(1.0 - abs(dot(normalize(vNormal), vView)), 2.2);
+            float bands = 0.5 + 0.5 * sin(vPos.y * 18.0 + vPos.x * 6.0);
+            float a = 0.06 + rim * 0.65 + bands * 0.04;
+            gl_FragColor = vec4(mix(uColor, vec3(1.0), rim * 0.5), a);
+        }`,
+});
+
 export class Bunny {
     constructor(dto, team) {
         this.id = dto.id;
@@ -768,6 +796,31 @@ export class Bunny {
     hurt(amount) {
         this.pendingHurt = amount ?? 20;
         this.play('hurt');
+        if (this.shieldMesh?.visible) this.shieldPop = 1; // the bubble takes the hit
+    }
+
+    /** The shield of a crate: a bubble around the bunny while hits are left. */
+    setShield(hits) {
+        this.shieldHits = Math.max(0, hits | 0);
+        const on = this.shieldHits > 0 && this.alive;
+        if (on && !this.shieldMesh) {
+            this.shieldMesh = new THREE.Mesh(shieldGeometry, shieldMaterial);
+            this.shieldMesh.position.y = 0.62;
+            this.shieldMesh.renderOrder = 4;
+            this.root.add(this.shieldMesh);
+        }
+        if (this.shieldMesh) this.shieldMesh.visible = on;
+    }
+
+    /** The Hasenloch: into the ground (0.45 s) … */
+    digIn() {
+        this.tele = { mode: 'in', t: 0 };
+    }
+
+    /** … and out again somewhere else (a pop). */
+    popOut() {
+        this.tele = { mode: 'out', t: 0 };
+        this.squash = 1;
     }
 
     /** Soot on the face, stars around the head, maybe the helmet pops off, and a word about it (once per hit, even when two callers report it). */
@@ -825,6 +878,7 @@ export class Bunny {
         if (!this.alive && (this.grave || this.sinking)) return;
         this.alive = false;
         this.label.sprite.visible = false;
+        if (this.shieldMesh) this.shieldMesh.visible = false;
         this.setAim(null);
         this.flight = null;
         this.spinner.quaternion.identity();
@@ -851,6 +905,7 @@ export class Bunny {
         if (!this.alive && this.sinking) return;
         this.alive = false;
         this.label.sprite.visible = false;
+        if (this.shieldMesh) this.shieldMesh.visible = false;
         this.setAim(null);
         this.flight = null;
         this.stars.visible = false;
@@ -1389,6 +1444,21 @@ export class Bunny {
         const m = this.model;
         m.position.y = -0.5 + p.y;
         m.scale.set(p.sx, p.sy, p.sx);
+        if (this.tele) {
+            // the Hasenloch: shrink down into the ground, or spring up out of it
+            const tl = this.tele;
+            tl.t += dt;
+            const k = Math.min(1, tl.t / (tl.mode === 'in' ? 0.45 : 0.5));
+            const s = tl.mode === 'in' ? Math.max(0.001, 1 - k * k) : Math.max(0.001, k < 1 ? 1 + Math.sin(k * Math.PI) * 0.25 - (1 - k) * 0.6 : 1);
+            m.scale.multiplyScalar(s);
+            m.position.y -= tl.mode === 'in' ? k * 0.6 : (1 - k) * 0.6;
+            if (tl.mode === 'out' && k >= 1) this.tele = null;
+        }
+        if (this.shieldMesh?.visible) {
+            this.shieldPop = Math.max(0, (this.shieldPop ?? 0) - dt * 3);
+            const wobble = 1 + Math.sin(this.clock * 3.1) * 0.03 + this.shieldPop * 0.25;
+            this.shieldMesh.scale.set(wobble, 1 + Math.cos(this.clock * 2.7) * 0.03 + this.shieldPop * 0.1, wobble);
+        }
         m.rotation.x = smooth(m.rotation.x, p.lean, 14, dt);
         m.rotation.z = smooth(m.rotation.z, p.roll, 14, dt);
         m.rotation.y = this.yaw + p.twist;
@@ -1616,6 +1686,7 @@ export class Bunny {
 
     dispose() {
         if (this.ghost) for (const mat of this.ghost.userData.materials) mat.dispose();
+        this.shieldMesh?.parent?.remove(this.shieldMesh);
         this.root.parent?.remove(this.root);
         this.label.dispose();
         this.bubble?.dispose();

@@ -121,6 +121,27 @@ export function predictShot(ctx, shooter, weapon, yaw, pitch, power) {
         if (path.how === 'impact' || path.how === 'fuse') result.impacts.push({ point: path.end, radius: r, hit: path.bunny && path.bunny.team !== shooter.team ? path.bunny : null });
         else if (path.how === 'splash') result.impacts.push({ point: new THREE.Vector3(path.end.x, ctx.data.waterLevel, path.end.z), radius: 0.9, hit: null, water: true });
     };
+    if (weapon.kind === 'Teleport') {
+        // the Hasenloch (MatchRoom: land ≥ water + 0.1, inside the map, ≥ 0.9 m from any other bunny); the hop arc is only a picture
+        if (!ctx.target) return null;
+        const t = ctx.target;
+        const inside = ctx.data.inside(t.x, t.z);
+        const ground = inside ? ctx.data.heightAt(t.x, t.z) : ctx.data.waterLevel;
+        const point = new THREE.Vector3(t.x, ground, t.z);
+        const blocked = !inside || ground < ctx.data.waterLevel + 0.1
+            || bunnies.some(b => b.alive && b !== shooter && Math.hypot(b.position.x - t.x, b.position.z - t.z) < 0.9);
+        const from = shooter.position;
+        const hop = Math.max(2, from.distanceTo(point) * 0.35);
+        const points = [];
+        for (let i = 0; i <= 24; i++) {
+            const k = i / 24;
+            points.push(new THREE.Vector3().lerpVectors(from, point, k).add(new THREE.Vector3(0, 0.5 + Math.sin(Math.PI * k) * hop, 0)));
+        }
+        result.paths.push({ points, end: point, how: 'teleport', bunny: null });
+        result.impacts.push({ point, radius: 0.9, hit: null, blocked, teleport: true });
+        result.blocked = blocked;
+        return result;
+    }
     if (weapon.kind === 'Airstrike') {
         if (!ctx.target) return null;
         const count = Math.max(1, weapon.count || 1);
@@ -233,6 +254,44 @@ export class AimGuide {
         this.time = 0;
         this.color = new THREE.Color(0xffffff);
         this.group.visible = false;
+        // the direction of an airstrike: a flat chunky arrow above the drop line (seen best from the bird's-eye view)
+        const shape = new THREE.Shape();
+        shape.moveTo(-0.22, 0);
+        shape.lineTo(0.22, 0);
+        shape.lineTo(0.22, 0.72);
+        shape.lineTo(0.5, 0.72);
+        shape.lineTo(0, 1);
+        shape.lineTo(-0.5, 0.72);
+        shape.lineTo(-0.22, 0.72);
+        shape.closePath();
+        const arrowGeometry = new THREE.ShapeGeometry(shape);
+        arrowGeometry.rotateX(-Math.PI / 2); // lies flat, points along -z → turned to the flight direction in showArrow
+        this.arrow = new THREE.Group();
+        this.arrowFill = new THREE.Mesh(arrowGeometry, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+        this.arrowEdge = new THREE.Mesh(arrowGeometry, new THREE.MeshBasicMaterial({ color: 0x28180a, transparent: true, opacity: 0.5, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+        this.arrowEdge.scale.setScalar(1.18);
+        this.arrowEdge.position.y = -0.01;
+        // under the crosshairs (their faint copy draws later, on top)
+        this.arrowFill.renderOrder = 5;
+        this.arrowEdge.renderOrder = 4;
+        this.arrow.add(this.arrowEdge, this.arrowFill);
+        this.arrow.visible = false;
+        parent.add(this.arrow);
+    }
+
+    /** The flight direction of an airstrike: from <from> to <to> (Vector3, y = the height to float at); null hides it. */
+    showArrow(from, to, color) {
+        if (!from || !to) {
+            this.arrow.visible = false;
+            return;
+        }
+        const dir = to.clone().sub(from);
+        const len = Math.max(1, Math.hypot(dir.x, dir.z));
+        this.arrow.visible = true;
+        this.arrow.position.copy(from);
+        this.arrow.rotation.set(0, Math.atan2(dir.x, dir.z) + Math.PI, 0);
+        this.arrow.scale.set(2.2, 1, len); // 1 m wide shaft, a head of about 2 m
+        this.arrowFill.material.color.set(color ?? 0xffffff).lerp(new THREE.Color(0xffffff), 0.3);
     }
 
     /** A marker: a small crosshair that keeps about the same size on the screen (update() sizes it by the camera distance). */
@@ -279,10 +338,10 @@ export class AimGuide {
                 m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
                 cross.rotation.z = this.time * (impact.hit ? 2.5 : 0.8);
 
-                const tint = impact.hit ? 0xff3b1f : impact.water ? 0x8fdcff : color ?? 0xffffff;
+                const tint = impact.hit || impact.blocked ? 0xff3b1f : impact.water ? 0x8fdcff : color ?? 0xffffff;
                 cross.material.color.set(tint);
                 cross.children[0].material.color.set(tint);
-                m.userData.hit = !!impact.hit;
+                m.userData.hit = !!impact.hit || !!impact.blocked;
             }
         }
         for (let i = used; i < this.markers.length; i++) this.markers[i].visible = false;
@@ -292,6 +351,7 @@ export class AimGuide {
     hide() {
         this.group.visible = false;
         this.paths = [];
+        if (this.arrow) this.arrow.visible = false;
     }
 
     layDots() {
@@ -352,7 +412,7 @@ export class AimGuide {
         for (const m of this.markers) {
             if (!m.visible) continue;
             const d = camera ? camera.position.distanceTo(m.position) : 12;
-            const size = Math.min(1.6, Math.max(0.35, d * 0.042));
+            const size = Math.min(3, Math.max(0.35, d * 0.042));
             m.userData.cross.scale.set(size, size, 1);
             m.userData.cross.children[0].scale.setScalar(pulse);
         }
@@ -360,6 +420,10 @@ export class AimGuide {
 
     dispose() {
         this.group.parent?.remove(this.group);
+        this.arrow.parent?.remove(this.arrow);
+        this.arrowFill.geometry.dispose();
+        this.arrowFill.material.dispose();
+        this.arrowEdge.material.dispose();
         for (const mesh of [this.hidden, this.outline, this.fill, this.shadow]) {
             mesh.material.dispose();
             mesh.dispose();

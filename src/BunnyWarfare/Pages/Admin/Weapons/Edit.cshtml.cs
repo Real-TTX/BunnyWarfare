@@ -55,6 +55,7 @@ public sealed class EditModel(AppDbContext db) : AppPageModel(db)
         new(nameof(WeaponKind.Cluster), WeaponLogic.KindName(WeaponKind.Cluster), "platzt in Bomblets"),
         new(nameof(WeaponKind.Hitscan), WeaponLogic.KindName(WeaponKind.Hitscan), "gerade Linie, sofort"),
         new(nameof(WeaponKind.Airstrike), WeaponLogic.KindName(WeaponKind.Airstrike), "Bomben von oben aufs Ziel"),
+        new(nameof(WeaponKind.Teleport), WeaponLogic.KindName(WeaponKind.Teleport), "bringt den Hasen ans Ziel, kein Schaden"),
     ];
 
     public async Task<IActionResult> OnGetAsync()

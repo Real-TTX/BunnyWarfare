@@ -18,6 +18,7 @@ public static class WeaponLogic
         WeaponKind.Cluster => "Splitterbombe",
         WeaponKind.Hitscan => "Schrot",
         WeaponKind.Airstrike => "Luftschlag",
+        WeaponKind.Teleport => "Teleporter",
         _ => kind.ToString(),
     };
 
@@ -80,8 +81,9 @@ public static class WeaponLogic
         weapon.Name = input.Name.Trim();
         weapon.Description = input.Description?.Trim() ?? string.Empty;
         weapon.Kind = input.Kind;
-        weapon.Damage = input.Damage;
-        weapon.BlastRadius = input.BlastRadius;
+        // the teleporter hurts nobody
+        weapon.Damage = input.Kind == WeaponKind.Teleport ? 0 : input.Damage;
+        weapon.BlastRadius = input.Kind == WeaponKind.Teleport ? 0 : input.BlastRadius;
 
         // only what the kind uses is kept; the rest goes back to its default, so a later change of the kind starts clean
         weapon.AffectedByWind = input.Kind is WeaponKind.Projectile or WeaponKind.Cluster && input.AffectedByWind;
@@ -116,12 +118,12 @@ public static class WeaponLogic
             throw new BusinessException("Der Name fehlt oder ist länger als 60 Zeichen.", nameof(WeaponInput.Name));
         }
 
-        if (input.Damage is < 1 or > 200)
+        if (input.Kind != WeaponKind.Teleport && input.Damage is < 1 or > 200)
         {
             throw new BusinessException("Der Schaden liegt zwischen 1 und 200.", nameof(WeaponInput.Damage));
         }
 
-        if (input.BlastRadius is < 0.5 or > 8)
+        if (input.Kind != WeaponKind.Teleport && input.BlastRadius is < 0.5 or > 8)
         {
             throw new BusinessException("Der Radius liegt zwischen 0,5 und 8 m.", nameof(WeaponInput.BlastRadius));
         }

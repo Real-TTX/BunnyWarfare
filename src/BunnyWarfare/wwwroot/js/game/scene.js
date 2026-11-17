@@ -150,6 +150,10 @@ export class CameraRig {
         this.shownDistance = null;
         this.autoPitch = 0; // a pitch the game wants at least (the aim camera looks a little more from above); dragging the camera wins
         this.shownPitch = null;
+        // the bird's-eye view: { distance, pitch } wins over everything above while set; the wheel scales it (overrideZoom), dragging tilts it (overridePitch)
+        this.override = null;
+        this.overrideZoom = 1;
+        this.overridePitch = null;
     }
 
     /** Where to look; snap = jump there at once. */
@@ -165,6 +169,10 @@ export class CameraRig {
 
     rotate(dx, dy) {
         this.yaw -= dx * 0.0055;
+        if (this.override) {
+            this.overridePitch = Math.min(1.45, Math.max(0.8, (this.overridePitch ?? this.override.pitch) + dy * 0.004));
+            return;
+        }
         if (dy !== 0) {
             this.pitch = Math.min(1.35, Math.max(0.05, (this.shownPitch ?? this.pitch) + dy * 0.004));
             this.manualPitch = true;
@@ -173,6 +181,10 @@ export class CameraRig {
 
     /** The zoom of the player: starts from what is shown and from then on wins over the aim camera (until the game resets manualZoom). */
     zoom(delta) {
+        if (this.override) {
+            this.overrideZoom = Math.min(1.7, Math.max(0.3, (this.overrideZoom ?? 1) * (1 + delta * 0.0012)));
+            return;
+        }
         const from = this.shownDistance ?? this.distance;
         this.distance = Math.min(this.maxDistance, Math.max(3.5, from * (1 + delta * 0.0012)));
         this.manualZoom = true;
@@ -201,17 +213,18 @@ export class CameraRig {
         } else {
             this.target.lerp(this.goal, 1 - Math.exp(-dt * this.followRate));
         }
-        const wanted = Math.min(this.maxDistance, this.manualZoom ? this.distance : Math.max(this.distance, this.autoDistance));
+        const wanted = this.override ? this.override.distance : Math.min(this.maxDistance, this.manualZoom ? this.distance : Math.max(this.distance, this.autoDistance));
         this.shownDistance = this.shownDistance == null ? wanted : this.shownDistance + (wanted - this.shownDistance) * (1 - Math.exp(-dt * 3));
         const distance = this.shownDistance;
-        const wantedPitch = this.manualPitch ? this.pitch : Math.max(this.pitch, this.autoPitch);
+        const wantedPitch = this.override ? this.override.pitch : this.manualPitch ? this.pitch : Math.max(this.pitch, this.autoPitch);
         this.shownPitch = this.shownPitch == null ? wantedPitch : this.shownPitch + (wantedPitch - this.shownPitch) * (1 - Math.exp(-dt * 3));
         const pitch = this.shownPitch;
         const back = this.forward.multiplyScalar(-distance * Math.cos(pitch));
         const pos = this.target.clone().add(back);
         pos.y += distance * Math.sin(pitch);
         // never below the ground, and never behind a hill: sample the line of sight and lift the camera (smoothly) until it is free
-        if (heightAt) {
+        // (not in the bird's-eye view: it looks at the middle of the island at sea level, hills in front of that point are no reason to climb)
+        if (heightAt && !this.override) {
             let lift = Math.max(0, heightAt(pos.x, pos.z) + 0.8 - pos.y);
             for (let i = 1; i <= 14; i++) {
                 const t = i / 14;

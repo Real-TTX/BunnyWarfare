@@ -10,6 +10,7 @@ Allein gegen Bots oder mit Freunden über das Netz – mit einer Administration 
 - **Profil, Level und Kleiderschrank:** Jedes fertige Spiel bringt XP (mehr für Siege, K.O. und Schaden; wer sofort aufgibt, bekommt nichts), bis Level 30. Mit Leveln, Siegen und K.O. werden Felle (bis Tiger, Galaxie, Gold, Regenbogen), Hüte (vom Stahlhelm bis Krone und Punk-Irokese), Gesichter und Porträtrahmen frei – teils richtig wild 🔥. Die Porträts zeigen den eigenen Hasen in Menü, Lobby, Rangliste und Spiel.
 - **Multiplayer:** Lobby mit Einladungslink, 2–8 Teams, Bots in drei Stärken, Zuschauen, Chat, Rangliste.
 - **Waffen:** Karottenwerfer (Wind), Rübengranate (springt, Zünder), Kohlkopf-Splitter (Bomblets), Löwenzahn-Flinte (Schrot), Möhrenregen (Luftschlag) – alle in der Administration änderbar.
+- **Versorgungskisten:** alle paar Runden fällt eine Kiste vom Himmel (pro Spiel: aus/selten/normal/oft) – mit Munition, auch für die Goldene Riesenmöhre, Leben, Panzerfell, Doppel-Wumms, Turbo-Möhre oder dem Hasenloch (Teleporter). Waffenkisten explodieren, wenn man sie trifft.
 - **Welten:** Möhrenwiese, Frostbau, Dünenland, Mondkrater (wenig Schwerkraft) – aus einem Seed erzeugt, mit Vorschau in der Administration.
 - **Administration** unter `/Admin` (nur Administratoren, nur sie sehen die klassische Oberfläche): Übersicht (live), Spieler, Spiele (beenden, löschen), Welten, Waffen, System. Design: MatUi aus [MatDesign](https://github.com/Real-TTX/MatDesign).
 

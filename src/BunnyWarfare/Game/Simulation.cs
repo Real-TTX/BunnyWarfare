@@ -18,6 +18,12 @@ public sealed record DeathEvent(double T, int BunnyId, string Cause);
 
 public sealed record RayEvent(double T, float[] From, float[] To);
 
+/// <summary>What happened to a supply crate during a shot: "destroyed", "picked" (by <see cref="BunnyId"/>, with <see cref="Text"/>), "moved" (to <see cref="Y"/>), "sunk".</summary>
+public sealed record CrateEvent(double T, int CrateId, string Action, int? BunnyId = null, double? Y = null, string? Text = null, string? Look = null);
+
+/// <summary>The Hasenloch: the bunny digs in at <see cref="From"/> and pops out at <see cref="To"/>.</summary>
+public sealed record TeleportEvent(double T, int BunnyId, float[] From, float[] To);
+
 /// <summary>Everything a shot does, in the order of time: the browsers play it, the server has already applied it.</summary>
 public sealed class ShotResult
 {
@@ -40,6 +46,10 @@ public sealed class ShotResult
     public List<BunnyTrack> BunnyTracks { get; } = [];
 
     public List<DeathEvent> Deaths { get; } = [];
+
+    public List<CrateEvent> Crates { get; } = [];
+
+    public List<TeleportEvent> Teleports { get; } = [];
 
     public double Duration { get; set; }
 
@@ -96,15 +106,34 @@ public static class Simulation
         var result = new ShotResult { ShooterId = shooter.Id, WeaponId = weapon.Id, WeaponName = weapon.Name, Kind = weapon.Kind };
         var (origin, dir) = Muzzle(shooter, aim);
         var power = Math.Clamp(aim.Power, 0.05, 1);
+        // "Doppel-Wumms" from a crate: this shot hurts twice as much (the Hasenloch does not use it up)
+        var team = state.Teams.FirstOrDefault(t => t.Index == shooter.TeamIndex);
+        var damage = weapon.Damage;
+        if (team is { DoubleDamage: true } && weapon.Kind != WeaponKind.Teleport)
+        {
+            damage *= 2;
+            team.DoubleDamage = false;
+        }
+
         switch (weapon.Kind)
         {
+            case WeaponKind.Teleport:
+            {
+                var from = shooter.Position;
+                var to = new V3(aim.TargetX, state.Terrain.HeightAt(aim.TargetX, aim.TargetZ), aim.TargetZ);
+                shooter.Position = to;
+                result.Teleports.Add(new TeleportEvent(0.5, shooter.Id, P(from), P(to)));
+                result.Extend(1.6);
+                break;
+            }
+
             case WeaponKind.Projectile:
             {
                 var flight = Fly(state, origin, dir * (power * MaxSpeed), new FlightOptions { Wind = weapon.AffectedByWind, Shooter = shooter });
                 Track(result, "carrot", 0, flight);
                 if (flight.How == FlightEnd.Impact)
                 {
-                    Explode(state, result, flight.End, flight.EndTime, weapon.BlastRadius, weapon.Damage, shooter.TeamIndex);
+                    Explode(state, result, flight.End, flight.EndTime, weapon.BlastRadius, damage, shooter.TeamIndex);
                 }
 
                 break;
@@ -116,7 +145,7 @@ public static class Simulation
                 Track(result, "beet", 0, flight);
                 if (flight.How is FlightEnd.Fuse or FlightEnd.Impact)
                 {
-                    Explode(state, result, flight.End, flight.EndTime, weapon.BlastRadius, weapon.Damage, shooter.TeamIndex);
+                    Explode(state, result, flight.End, flight.EndTime, weapon.BlastRadius, damage, shooter.TeamIndex);
                 }
 
                 break;
@@ -131,7 +160,7 @@ public static class Simulation
                     break;
                 }
 
-                Explode(state, result, flight.End, flight.EndTime, weapon.BlastRadius, weapon.Damage, shooter.TeamIndex);
+                Explode(state, result, flight.End, flight.EndTime, weapon.BlastRadius, damage, shooter.TeamIndex);
                 var count = Math.Max(1, weapon.ClusterCount);
                 var start = flight.End + new V3(0, 0.4, 0);
                 for (var i = 0; i < count; i++)
@@ -143,7 +172,7 @@ public static class Simulation
                     Track(result, "leaf", flight.EndTime, bomblet);
                     if (bomblet.How == FlightEnd.Impact)
                     {
-                        Explode(state, result, bomblet.End, flight.EndTime + bomblet.EndTime, weapon.BlastRadius * 0.7, (int)Math.Round(weapon.Damage * 0.6),
+                        Explode(state, result, bomblet.End, flight.EndTime + bomblet.EndTime, weapon.BlastRadius * 0.7, (int)Math.Round(damage * 0.6),
                             shooter.TeamIndex);
                     }
                 }
@@ -165,7 +194,7 @@ public static class Simulation
                     result.Rays.Add(new RayEvent(t, P(from), P(to)));
                     if (hit)
                     {
-                        Explode(state, result, to, t + 0.05, weapon.BlastRadius, weapon.Damage, shooter.TeamIndex);
+                        Explode(state, result, to, t + 0.05, weapon.BlastRadius, damage, shooter.TeamIndex);
                     }
 
                     result.Extend(t + 0.3);
@@ -188,7 +217,7 @@ public static class Simulation
                     Track(result, "carrot-drop", t0, drop);
                     if (drop.How == FlightEnd.Impact)
                     {
-                        Explode(state, result, drop.End, t0 + drop.EndTime, weapon.BlastRadius, weapon.Damage, shooter.TeamIndex);
+                        Explode(state, result, drop.End, t0 + drop.EndTime, weapon.BlastRadius, damage, shooter.TeamIndex);
                     }
                 }
 
@@ -196,10 +225,29 @@ public static class Simulation
             }
         }
 
-        // whatever lost the ground under its feet falls now
+        // whatever lost the ground under its feet falls now; then the crates follow the ground and the bunnies take what they landed on
         Settle(state, result, result.Duration, shooter.TeamIndex);
+        Crates.Settle(state, result, result.Duration);
+        Crates.PickUpAfterShot(state, result, result.Duration);
         result.Extend(0.5);
         return result;
+    }
+
+    /// <summary>Whether the Hasenloch may bring <paramref name="bunny"/> to (x, z): on the island, on land, not onto another bunny.</summary>
+    public static bool CanTeleport(GameState state, BunnyState bunny, double x, double z)
+    {
+        var terrain = state.Terrain;
+        if (!double.IsFinite(x) || !double.IsFinite(z) || x < 0.3 || z < 0.3 || x > terrain.Width - 0.3 || z > terrain.Width - 0.3)
+        {
+            return false;
+        }
+
+        if (terrain.HeightAt(x, z) < terrain.WaterLevel + 0.1)
+        {
+            return false;
+        }
+
+        return !state.Bunnies.Any(b => b.Alive && b != bunny && Math.Sqrt((b.Position.X - x) * (b.Position.X - x) + (b.Position.Z - z) * (b.Position.Z - z)) < 0.9);
     }
 
     /// <summary>Where a shot would land, without changing anything (the bots aim with it). Null when it ends in the water or off the map.</summary>
@@ -369,8 +417,8 @@ public static class Simulation
         result.Extend(start + flight.EndTime);
     }
 
-    /// <summary>An explosion: crater, damage by distance, knockback, falls.</summary>
-    private static void Explode(GameState state, ShotResult result, V3 center, double t, double radius, int damage, int shooterTeam)
+    /// <summary>An explosion: crater, damage by distance, knockback, falls; crates in it are destroyed, a weapon crate goes up itself (depth: chain only once).</summary>
+    private static void Explode(GameState state, ShotResult result, V3 center, double t, double radius, int damage, int shooterTeam, int depth = 0)
     {
         var craterRadius = radius * 0.75;
         result.Explosions.Add(new ExplosionEvent(t, R(center.X), R(center.Y), R(center.Z), radius, craterRadius));
@@ -398,6 +446,14 @@ public static class Simulation
         foreach (var (bunny, velocity) in knocked)
         {
             Tumble(state, result, bunny, velocity, t, shooterTeam);
+        }
+
+        foreach (var crate in Crates.DestroyNear(state, result, center, radius, t))
+        {
+            if (depth < 2)
+            {
+                Explode(state, result, crate.Position + new V3(0, Crates.CenterHeight, 0), t + 0.15, Crates.BlastRadius, Crates.BlastDamage, shooterTeam, depth + 1);
+            }
         }
     }
 
@@ -503,6 +559,13 @@ public static class Simulation
         if (!bunny.Alive || amount <= 0)
         {
             return;
+        }
+
+        // the "Panzerfell" of a crate halves a hit (not the water)
+        if (bunny.Shield > 0 && cause == "hp")
+        {
+            amount = (amount + 1) / 2;
+            bunny.Shield--;
         }
 
         var dealt = Math.Min(amount, bunny.Health);

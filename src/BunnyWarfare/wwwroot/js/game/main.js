@@ -150,6 +150,7 @@ function wireHud() {
     fire.addEventListener('pointerup', () => match.releaseCharge());
     fire.addEventListener('pointerleave', () => match.releaseCharge());
     $('bw-btn-skip').onclick = () => match.skip();
+    $('bw-btn-bird').onclick = () => match.toggleBird();
     $('bw-btn-help').onclick = () => ($('bw-help').hidden = !$('bw-help').hidden);
     $('bw-help-close').onclick = () => ($('bw-help').hidden = true);
     $('bw-btn-menu').onclick = () => ($('bw-dropdown').hidden = !$('bw-dropdown').hidden);

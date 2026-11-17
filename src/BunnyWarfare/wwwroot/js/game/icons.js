@@ -41,9 +41,29 @@ const WEAPONS = {
         <path d="M38 28l3.6 0-1.8 12z" fill="#f97316" stroke="${S}" stroke-width="2.2" stroke-linejoin="round"/>
         <path d="M16 24c-1-2-1-3 0-4M30 22c-1-2-1-3 0-4M40 28c-1-2-1-3 0-4" stroke="#4fa83a" stroke-width="2.4" stroke-linecap="round"/>
     </svg>`,
+    // Hasenloch: a hole in the ground with two bunny ears popping out, a shovel beside it
+    Teleport: `<svg class="wico" viewBox="0 0 48 48" aria-hidden="true">
+        <ellipse cx="22" cy="38" rx="16" ry="6" fill="#5a3f26" stroke="${S}" stroke-width="2.4"/>
+        <ellipse cx="22" cy="37" rx="11" ry="3.6" fill="#2a1a0e"/>
+        <path d="M16 36c-2-8-2-16 1-20 3 3 4 12 3 20zM24 36c0-8 2-16 6-19 2 4 0 13-3 19z" fill="#f4efe7" stroke="${S}" stroke-width="2.2" stroke-linejoin="round"/>
+        <path d="M17.5 33c-.6-5-.4-10 .8-13M26 33c.6-5 1.8-10 3.4-12" stroke="#f5a9b8" stroke-width="2" stroke-linecap="round"/>
+        <path d="M40 6l-6 22" stroke="#8a5a2b" stroke-width="3" stroke-linecap="round"/>
+        <path d="M33 26l-3 9c2 2 5 1 6-1l1-8z" fill="#f97316" stroke="${S}" stroke-width="2.2" stroke-linejoin="round"/>
+        <path d="M6 20l3 2M5 27l4 0M37 38l4 1" stroke="${S}" stroke-width="2" stroke-linecap="round"/>
+    </svg>`,
+    // golden giant carrot (crates only): the carrot in gold with sparkles
+    Golden: `<svg class="wico" viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M31 17 7 43c-1 1 0 2 1 1l26-22z" fill="#ffcc33" stroke="${S}" stroke-width="2.6" stroke-linejoin="round"/>
+        <path d="M17 33l3 3M21 28l3 3M25 23l3 3" stroke="#c98a00" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M14 34l12-13" stroke="#fff4b8" stroke-width="2" stroke-linecap="round"/>
+        <path d="M32 16c2-6 7-10 13-10-1 6-4 11-10 13zM30 14c-1-5 0-9 4-12 2 4 2 9-1 12zM35 20c4-1 8 1 10 4-4 1-8 0-10-2z" fill="#4fa83a" stroke="${S}" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M8 10l1.6 3.6L13 15l-3.4 1.4L8 20l-1.6-3.6L3 15l3.4-1.4zM40 32l1 2.4 2.4 1-2.4 1-1 2.4-1-2.4-2.4-1 2.4-1z" fill="#fff07a" stroke="${S}" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>`,
 };
 
-export function weaponIcon(kind) {
+/** The icon of a weapon by its kind (the golden carrot by its name). */
+export function weaponIcon(kind, name = '') {
+    if (kind === 'Projectile' && /gold/i.test(name)) return html(WEAPONS.Golden);
     return html(WEAPONS[kind] ?? WEAPONS.Projectile);
 }
 

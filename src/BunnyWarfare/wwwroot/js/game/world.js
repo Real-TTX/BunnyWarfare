@@ -7,6 +7,7 @@ import { Particles, Effects } from './effects.js';
 import { Water } from './world/water.js';
 import { Vegetation } from './world/vegetation.js';
 import { Life } from './world/life.js';
+import { Crates } from './world/crates.js';
 import { createWindUniforms } from './world/util.js';
 
 /** The same seed in every browser: from the island itself (size, theme, a few heights), not from time or chance. */
@@ -54,6 +55,9 @@ export class World {
         this.effects = new Effects(this.group, this.particles, w.theme);
         this.marker = new TurnMarker();
         this.group.add(this.marker.mesh);
+        // supply crates (a match only; the menu island has none): what is on the island at the moment of joining shows at once
+        this.crates = new Crates(this.group, this.particles);
+        this.crates.sync(game.crates ?? [], true);
         this.teams = new Map();
         this.bunnies = new Map();
         this.setTeams(game.teams ?? []);
@@ -86,10 +90,12 @@ export class World {
                 b = new Bunny(dto, this.teams.get(dto.team));
                 this.bunnies.set(dto.id, b);
                 this.group.add(b.root);
+                b.setShield?.(dto.shield ?? 0);
                 continue;
             }
             b.snap(dto.x, dto.y, dto.z, dto.yaw);
             b.setHealth(dto.health);
+            b.setShield?.(dto.shield ?? 0);
             if (dto.health <= 0 && b.alive) b.die(false);
         }
     }
@@ -112,6 +118,7 @@ export class World {
         for (const b of this.bunnies.values()) b.update(dt, time);
         this.vegetation.update(dt, this.uniforms.uWind.value, this.bunnies.values());
         this.marker.update(dt);
+        this.crates.update(dt, time);
         this.particles.update(dt);
         this.effects.update(dt);
         this.life.update(dt, time, this.stage.camera);
@@ -121,6 +128,7 @@ export class World {
     dispose() {
         for (const b of this.bunnies.values()) b.dispose();
         this.effects.clear();
+        this.crates.dispose();
         this.terrain.dispose();
         this.skirt.dispose();
         this.water.dispose();

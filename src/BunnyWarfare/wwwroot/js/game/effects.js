@@ -6,7 +6,7 @@
 //   new Particles(capacity)               .points (an Object3D to add to the scene) · emit(at, opts) · update(dt)
 //       opts: count, speed, up, colors [hex], life (s), gravity (× 9.81, negative rises), spread (m), size (m), grow (end size factor),
 //             fade (alpha to 0, default true), drag, additive (glowing), ring (horizontal burst), dir (Vector3 bias), colorEnd (hex)
-//   activeParticles()                     the Particles created last (the bunnies put their dust there)
+//   activeParticles()                     the Particles created last (the bunnies put their dust there) · setActiveParticles(p) puts one back
 //   new Effects(group, particles, theme)  explosion(at, radius) · splash(at) · ray(from, to) · trail(at, look?) · muzzle(at) · update(dt) · clear()
 //                                         setGround((x, z) => height) lets dirt chunks bounce on the terrain
 //   new Floaters(container, camera)       add(position, text, kind: 'damage' | 'ko' | 'water' | 'heal') · update(dt) · clear()
@@ -22,6 +22,11 @@ let lastParticles = null;
 /** The particle pool created last (one per island). */
 export function activeParticles() {
     return lastParticles;
+}
+
+/** Puts back the pool the bunnies use by default (an offscreen island, e.g. a level screenshot, must not take it away). */
+export function setActiveParticles(particles) {
+    lastParticles = particles;
 }
 
 const PARTICLE_VERTEX = /* glsl */ `

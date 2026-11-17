@@ -13,7 +13,7 @@ The browser connects with the cookie of the sign-in (the hub is `[Authorize]`). 
 | `Start()` | | host, lobby, ≥ 2 teams | Saves the teams, builds the island, places the bunnies, first turn. |
 | `Move(x, z, yaw)` | feet position, facing | the player of the turn (Aiming, Retreat) | ≤ 1.6 m per message, within the stamina, not into water, not up steep walls; else a correction to the sender only. |
 | `AimAt(yaw, pitch, weaponId)` | | the player of the turn | Relayed to the others (spectators see the aim). |
-| `Fire(weaponId, yaw, pitch, power, targetX, targetZ)` | radians, power 0..1, target only for the airstrike | the player of the turn (Aiming) | Simulates the shot, sends `Shot`. |
+| `Fire(weaponId, yaw, pitch, power, targetX, targetZ)` | radians, power 0..1, target only for the airstrike and the Hasenloch (`Teleport`) | the player of the turn (Aiming) | Simulates the shot, sends `Shot`. A Hasenloch target in the water, off the map or on another bunny is refused ("Da kann der Hase nicht hin."). |
 | `SkipTurn()` | | the player of the turn | |
 | `Surrender()` | | a player of the match | All their bunnies leave the island. |
 | `Chat(text)` | ≤ 200 characters | everyone in the room | |
@@ -25,7 +25,9 @@ Errors (not your turn, no ammo ...) arrive as a `HubException` with a German mes
 | Message | Payload | When |
 |---|---|---|
 | `Room` | `RoomDto` (lobby, and on start the whole `GameDto` with the height map) | lobby changes, start |
-| `Turn` | `TurnUpdateDto` (turn, all bunnies, all teams) | a new turn, the retreat after a shot, a correction after a surrender — the browser snaps to it |
+| `Turn` | `TurnUpdateDto` (turn, all bunnies, all teams, all `crates`) | a new turn, the retreat after a shot, a correction after a surrender — the browser snaps to it |
+| `CrateDrop` | `CrateDropDto { crate }` | right after the `Turn` message of a turn in which a supply crate falls (that `Turn` already lists it): animate the fall |
+| `CratePicked` | `CratePickedDto { crateId, bunnyId, team, look, text, teamState, bunny, stamina }` | a bunny walked onto a crate — to everyone, also the walker: show `text`, apply `teamState` (ammo, effects), `bunny` (health, shield) and `stamina` |
 | `Moved` | `MovedDto` (`correction = true`: snap your own bunny back) | the bunny of the turn walked |
 | `Aim` | `AimDto` | the player of the turn aims (or a bot) |
 | `Shot` | `ShotResult` | a shot: everything it does, in time order |
@@ -38,6 +40,23 @@ Every team carries how its bunnies look: `fur`, `outfit`, `face` (keys of `Busin
 plus `level` (players: from their XP; bots: a level by their strength). They are in `TeamDto`, the lobby slots (`LobbySlotDto`) and `TeamResultDto`.
 The XP of a match (`Cosmetics.XpForMatch`: 25 + 10 per place above 4th for taking part, only when the team won, hit or knocked out something; + 75 for the win + 30 per K.O. + damage/4 up to 300) goes to players only, never for an aborted match;
 the result computes it in the room (from the player's progress when they took the seat), `MatchLogic.FinishAsync` saves the same number.
+
+## Supply crates
+
+The match option `crateRate` (`RoomDto.crateRate` 0 off, 1 rare, 2 normal, 3 often; `crateRateName` "Aus" / "Selten" / "Normal" / "Oft"; quick matches: normal).
+At the start of every turn from turn 2 a crate may fall (rare 20 %, normal 35 %, often 60 % per turn; certain after 5 / 4 / 3 turns without one; at most 3 on the island)
+onto a free land spot (not steep, ≥ 2.5 m from bunnies and crates). `CrateDto { id, x, y, z, look }` (the bottom of the crate) is in `GameDto.crates` and `TurnUpdateDto.crates`;
+`look` is `weapon` | `health` | `support`, the content stays secret (`Game/Crates.cs`):
+
+- weapon (55 %): ammo for a limited weapon of the match, also the crate-only ones (`AmmoPerMatch` 0: "Goldene Riesenmöhre"): +1 for crate-only weapons and the airstrike, else +2.
+- health (25 %): +35 for the picking bunny, at most up to its full health.
+- support (20 %): `shield` "Panzerfell" (the bunny takes half damage from its next 2 hits, `BunnyDto.shield` = hits left), `double` "Doppel-Wumms" (the team's next shot does
+  double damage, `TeamDto.effects` contains `double`), `turbo` "Turbo-Möhre" (+8 m stamina now when it is the team's turn, else at its next turn: effect `turbo`),
+  or +1 "Hasenloch" (the teleport weapon, crate-only).
+
+A living bunny whose feet come within 0.9 m (1.2 m up or down) of a crate takes it: after an accepted `Move` (message `CratePicked`) and after a shot for every bunny at its
+final position (`ShotResult.crates` with action `picked`; the team and bunny changes arrive with the next `Turn`). An explosion destroys every crate in its radius; a weapon crate
+then explodes itself (damage 25, radius 2.2, 0.15 s later; a chain goes on only once). After a shot crates follow the dug-away ground (`moved`) or sink when it is under water (`sunk`).
 
 ## Coordinates and the height map
 
@@ -55,11 +74,13 @@ the result computes it in the room (from the player's progress when they took th
 - `damages[]`: `t`, `bunnyId`, `amount`, `health` (after the hit).
 - `bunnyTracks[]`: knockback and falls, `bunnyId`, `start`, `points` (1/30 s).
 - `deaths[]`: `t`, `bunnyId`, `cause` (`hp`, `water`).
-- `kind` is the weapon kind as a number (0 projectile, 1 grenade, 2 cluster, 3 hitscan, 4 airstrike).
+- `crates[]`: `t`, `crateId`, `action` (`destroyed`, `picked`, `moved`, `sunk`), `bunnyId` (picked), `y` (moved: the new bottom), `text` and `look` (picked; `look` also on destroyed/sunk).
+- `teleports[]`: the Hasenloch, `t`, `bunnyId`, `from`, `to` (`[x, y, z]`, feet).
+- `kind` is the weapon kind as a number (0 projectile, 1 grenade, 2 cluster, 3 hitscan, 4 airstrike, 5 teleport). `WeaponDto.kind` is the name (`Teleport` for the Hasenloch).
 
 ## Turn flow
 
-`Aiming` (turn time; walk with stamina 9 m, shoot once) → `Resolving` (the browsers play the shot) → `Retreat` (3 s to run, humans only) → next team.
+`Aiming` (turn time; walk with stamina 9 m (+8 with a Turbo-Möhre), shoot once) → `Resolving` (the browsers play the shot) → `Retreat` (3 s to run, humans only) → next team.
 A team without living bunnies is out; when one team is left it wins (none: a draw). Bots think for about two seconds, then shoot.
 A running match without any of its players connected for 30 seconds is aborted (spectators do not count); after a restart of the server every running match is aborted (the state lives in memory).
 
@@ -82,7 +103,7 @@ Errors: `400 { error, field }` (field in camelCase or null), `401` not signed in
 | GET | `/api/worlds` | | `[{ id, name, description, theme, themeName, gridSize, width, gravity, maxWind }]` |
 | GET | `/api/worlds/{id}/terrain` | | `WorldDto` (height map for previews) |
 | GET | `/api/matches` | `q, status (lobby\|running\|mine), page` | `{ items[{ token, name, worldName, theme, hostName, status, maxTeams, seats, bunniesPerTeam, turnSeconds, createDate, isMine }], matching, total }` |
-| POST | `/api/matches` | `{ name, worldId, maxTeams, bunniesPerTeam, bunnyHealth, turnSeconds, isPublic }` | `{ token }` |
+| POST | `/api/matches` | `{ name, worldId, maxTeams, bunniesPerTeam, bunnyHealth, turnSeconds, isPublic, crateRate }` (crateRate 0–3, default 2) | `{ token }` |
 | POST | `/api/matches/quick` | `{ worldId?, bots, level }` | `{ token }` (the app joins, adds the bots and starts) |
 | GET | `/api/leaderboard` | `q, sort (rank\|level\|name\|games\|kills\|damage), dir, page` | `{ items[] (with level, fur, outfit, face, frame), matching, total }` |
 | GET/PUT | `/api/profile` | `{ displayName, teamName, teamColor }` | `{ displayName, loginName, teamName, teamColor, fur, outfit, face, frame, level, xp, xpAtLevel, xpForNext, maxLevel, stats, wardrobe[{ kind, name, items[{ key, name, unlocked, requirement, wild, level }] }], colors[] }` |

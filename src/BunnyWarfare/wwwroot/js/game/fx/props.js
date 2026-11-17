@@ -295,6 +295,41 @@ function radioGeometry() {
     return merge(parts);
 }
 
+/** The Hasenloch: a digging shovel with a wooden handle and a carrot-orange blade (the bunny digs in and pops out elsewhere). Along +z. */
+function shovelGeometry() {
+    const parts = [];
+    const handle = new THREE.CylinderGeometry(0.022, 0.026, 0.62, 8);
+    handle.rotateX(Math.PI / 2);
+    handle.translate(0, 0, 0.02);
+    paint(handle, PALETTE.wood);
+    parts.push(handle);
+    const grip = new THREE.TorusGeometry(0.055, 0.016, 6, 12);
+    grip.translate(0, 0, -0.33);
+    paint(grip, PALETTE.woodDark);
+    parts.push(grip);
+    // the blade: a rounded, slightly cupped carrot shape
+    const blade = new THREE.SphereGeometry(0.12, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6);
+    blade.scale(1, 0.35, 1.5);
+    blade.rotateX(Math.PI / 2);
+    blade.translate(0, 0, 0.42);
+    paint(blade, (x, y, z) => (z > 0.52 ? '#e8590c' : '#f97316'));
+    parts.push(blade);
+    const collar = new THREE.CylinderGeometry(0.035, 0.03, 0.06, 8);
+    collar.rotateX(Math.PI / 2);
+    collar.translate(0, 0, 0.32);
+    paint(collar, PALETTE.metal);
+    parts.push(collar);
+    for (const s of [-1, 0, 1]) {
+        const leaf = sphere(0.03, 6, 4);
+        leaf.scale(0.5, 0.3, 1.8);
+        leaf.rotateY(s * 0.5);
+        leaf.translate(s * 0.03, 0.02, -0.38);
+        paint(leaf, PALETTE.leaf);
+        parts.push(leaf);
+    }
+    return merge(parts);
+}
+
 /** The model of a weapon kind in the paws (a group, origin = between the paws, looking along +z). */
 export function weaponModel(kind) {
     const g = new THREE.Group();
@@ -322,6 +357,13 @@ export function weaponModel(kind) {
             const m = mesh(cached('radio', radioGeometry));
             m.position.set(0.4, 0.15, -0.06); // in the raised paw, next to the big head
             m.rotation.z = -0.25;
+            g.add(m);
+            break;
+        }
+        case 'Teleport': {
+            const m = mesh(cached('shovel', shovelGeometry));
+            m.position.set(0.1, 0.0, 0.12);
+            m.rotation.x = 0.35; // the blade down, ready to dig
             g.add(m);
             break;
         }

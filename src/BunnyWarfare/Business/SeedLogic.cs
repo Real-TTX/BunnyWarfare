@@ -75,8 +75,30 @@ public static class SeedLogic
             }
         }
 
+        // weapons that came with later versions (the ones only found in supply crates): added once by name, also a deleted one counts as there
+        var knownWeapons = await db.Weapons.Select(w => w.Name).ToListAsync();
+        foreach (var weapon in LaterWeapons().Where(w => !knownWeapons.Contains(w.Name)))
+        {
+            db.Weapons.Add(weapon);
+        }
+
         await db.ActingAs(actor.AuditId).SaveChangesAsync();
     }
+
+    /// <summary>The weapons of the supply crates: AmmoPerMatch 0 = nobody has them at the start, a crate brings one.</summary>
+    internal static IReadOnlyList<Weapon> LaterWeapons() =>
+    [
+        new()
+        {
+            Name = "Goldene Riesenmöhre", Kind = WeaponKind.Projectile, Damage = 70, BlastRadius = 4.0, AffectedByWind = true, AmmoPerMatch = 0, SortOrder = 60,
+            Description = "Nur aus Kisten: eine goldene Riesen-Karotte mit gewaltigem Krater. Treibt im Wind.",
+        },
+        new()
+        {
+            Name = "Hasenloch", Kind = WeaponKind.Teleport, Damage = 0, BlastRadius = 0, AmmoPerMatch = 0, SortOrder = 70,
+            Description = "Nur aus Kisten: ein Ziel auf der Insel wählen – der Hase buddelt sich ein und taucht dort wieder auf.",
+        },
+    ];
 
     /// <summary>More islands in every theme and size: small duel maps (64–72 points), medium ones and a few big ones (up to 124 points).</summary>
     internal static IReadOnlyList<World> LaterWorlds() =>

@@ -148,6 +148,10 @@ public sealed class GameHub(AppDbContext db, RoomRegistry registry, ILogger<Game
                         {
                             await Clients.Client(m.OnlyConnection).SendAsync(m.Method, m.Payload);
                         }
+                        else if (m.ToAll)
+                        {
+                            await Clients.Group(group).SendAsync(m.Method, m.Payload);
+                        }
                         else
                         {
                             await Clients.OthersInGroup(group).SendAsync(m.Method, m.Payload);
@@ -190,6 +194,6 @@ public sealed class GameHub(AppDbContext db, RoomRegistry registry, ILogger<Game
         var result = new ResultDto(winner?.TeamIndex, winner?.TeamName, aborted, teams);
         var status = match.Status == MatchStatus.Running ? MatchStatus.Aborted : match.Status;
         return new RoomDto(match.Token.ToString(), match.Name, status.ToString(), match.HostPlayerId, match.World?.Name ?? string.Empty, (match.World?.Theme ?? WorldTheme.Meadow).ToString(),
-            match.MaxTeams, match.BunniesPerTeam, match.BunnyHealth, match.TurnSeconds, [], null, result);
+            match.MaxTeams, match.BunniesPerTeam, match.BunnyHealth, match.TurnSeconds, [], null, result, (int)match.CrateRate, Business.MatchLogic.CrateRateName(match.CrateRate));
     }
 }

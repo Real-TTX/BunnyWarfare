@@ -33,6 +33,7 @@
                             <dt>Welt</dt><dd>@m.World?.Name (@WorldLogic.ThemeName(m.World?.Theme ?? WorldTheme.Meadow))</dd>
                             <dt>Gastgeber</dt><dd>@m.HostPlayer?.DisplayName</dd>
                             <dt>Regeln</dt><dd>@m.MaxTeams Teams · @m.BunniesPerTeam Hasen · @m.BunnyHealth HP · @m.TurnSeconds s</dd>
+                <dt>Kisten</dt><dd>@MatchLogic.CrateRateName(m.CrateRate)</dd>
                             <dt>Erstellt</dt><dd class="mat-mono">@Ui.Stamp(m.CreateDate)</dd>
                             <dt>Gestartet</dt><dd class="mat-mono">@Ui.Stamp(m.StartDate)</dd>
                             <dt>Beendet</dt><dd class="mat-mono">@Ui.Stamp(m.EndDate)</dd>

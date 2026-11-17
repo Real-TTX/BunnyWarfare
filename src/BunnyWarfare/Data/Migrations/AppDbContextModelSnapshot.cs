@@ -36,6 +36,9 @@ namespace BunnyWarfare.Data.Migrations
                     b.Property<int>("BunnyHealth")
                         .HasColumnType("integer");
 
+                    b.Property<short>("CrateRate")
+                        .HasColumnType("smallint");
+
                     b.Property<DateTime>("CreateDate")
                         .HasColumnType("timestamp with time zone");
 
