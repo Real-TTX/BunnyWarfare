@@ -1,6 +1,6 @@
 // Keyboard and pointer: which keys are held, camera drags, zoom, clicks on the island.
 export class Input {
-    /** handlers: keyDown(code, event) → true when used, keyUp(code), rotate(dx, dy), zoom(delta), click(x, y) */
+    /** handlers: keyDown(code, event) → true when used, keyUp(code), rotate(dx, dy, button, shift), zoom(delta), click(x, y) */
     constructor(surface, handlers) {
         this.held = new Set();
         this.handlers = handlers;
@@ -23,7 +23,7 @@ export class Input {
 
         surface.addEventListener('pointerdown', e => {
             surface.setPointerCapture(e.pointerId);
-            this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 };
+            this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, button: e.button };
         });
         surface.addEventListener('pointermove', e => {
             if (!this.drag || this.drag.id !== e.pointerId) return;
@@ -31,11 +31,11 @@ export class Input {
             this.drag.x = e.clientX;
             this.drag.y = e.clientY;
             this.drag.moved += Math.abs(dx) + Math.abs(dy);
-            handlers.rotate?.(dx, dy);
+            handlers.rotate?.(dx, dy, this.drag.button, e.shiftKey);
         });
         const end = e => {
             if (!this.drag || this.drag.id !== e.pointerId) return;
-            if (this.drag.moved < 6) handlers.click?.(e.clientX, e.clientY);
+            if (this.drag.moved < 6 && this.drag.button === 0) handlers.click?.(e.clientX, e.clientY);
             this.drag = null;
         };
         surface.addEventListener('pointerup', end);

@@ -1,23 +1,27 @@
-// The bunnies: a fluffy stylised model from primitives with procedural animations, a label with name and health,
-// the marker of the turn, the gravestone and the little ghost of a knocked-out bunny.
+// The bunnies: chubby cartoon bunnies from primitives (a big head with googly eyes, eyebrows and a buck-tooth mouth, big feet),
+// procedural animations with faces, idle fidgets and slapstick (dizzy stars, soot, a helmet that pops off, plasters), speech bubbles,
+// a label with name and health, the marker of the turn, the gravestone and the little ghost of a knocked-out bunny.
 //
-// Public API (used by world.js, main.js, playback.js and the menu):
+// Public API (used by world.js, main.js, playback.js, match.js and the menu):
 //   new Bunny(dto, team)            dto = BunnyDto ({ id, team, name, x, y, z, yaw, health, maxHealth }), team = TeamDto ({ color })
 //   .root .position .goal .yaw .goalYaw .moving .alive .grave .color .id .team .name
-//   setHealth(health)               the label's bar animates to it
+//   setHealth(health)               the label's bar animates to it (low health shows plasters)
 //   snap(x, y, z, yaw?)             puts the bunny there at once
 //   walkTo(x, y, z, yaw)            walks smoothly (hops) to a position
 //   die(animate = true)             falls over, a ghost rises, the gravestone grows (animate = false: just the gravestone)
 //   sink()                          drowned: sinks with bubbles, no gravestone
-//   setAim(points, color)           the dotted aim line (null hides it); also puts the bunny into its aim pose and tilts the weapon
+//   setAim(points)                  the aim pose for a while (null ends it), the weapon tilts with the line; the line itself is AimGuide (aim.js)
 //   update(dt, time) sync() dispose()
 //   play(name)                      'idle' | 'walk' | 'aim' | 'cheer' | 'dance' | 'wave' | 'eat' (loops) · 'fire' | 'hurt' (once, then back)
+//                                   'hurt' also brings the slapstick: soot, dizzy stars, maybe the helmet pops off; idle bunnies fidget by themselves
 //   setWeapon(kind | null)          holds a weapon: 'Projectile' (carrot bazooka), 'Grenade' (beet), 'Cluster' (cabbage), 'Hitscan' (dandelion shotgun),
 //                                   'Airstrike' (radio); null puts it away (it still shows while aiming)
 //   setAimPitch(rad)                tilts the weapon and the arms (setAim does it from the line by itself)
 //   lookAt(x, z)                    turns the bunny towards a point
-//   hurt(amount?)                   flinch and a red flash (the playback calls it on damage)
-//   setFlight(vx, vy, vz) / land()  tumbling through the air along a knockback track, the landing squash
+//   hurt(amount?)                   flinch, a red flash and the slapstick of 'hurt', stronger for big hits (the playback calls it on damage)
+//   setFlight(vx, vy, vz) / land()  tumbling through the air along a knockback track (screaming), the landing squash
+//   say(text, seconds = 2.2)        a cartoon speech bubble above the head (replaces the one shown); the bunny also quips by itself
+//                                   now and then when it is hit, flies, fires, sneezes or is knocked out
 //   attachFx(particles)             where the dust of the hops and the bubbles go (default: the Particles created last)
 //   showLabel(visible)              the name and health above the head (the menu hides them)
 // TurnMarker: new TurnMarker() · .mesh · attach(bunny | null) · update(dt)
@@ -30,15 +34,20 @@ import { activeParticles } from './effects.js';
 
 /** Fur colours: every bunny gets one (by its id), the team shows on the helmet and the scarf. */
 const FURS = [
-    { fur: '#f4efe7', shade: '#d8cdbf', belly: '#fffaf3', inner: '#f5a9b8' }, // snow white
-    { fur: '#d9a46c', shade: '#b07a46', belly: '#f8e6cc', inner: '#f2a0a8' }, // caramel
-    { fur: '#b3aca6', shade: '#8a827c', belly: '#ebe6e1', inner: '#eea2b1' }, // grey
-    { fur: '#efdfc0', shade: '#cdb48a', belly: '#fffaf0', inner: '#f5aab4' }, // cream
-    { fur: '#9a7253', shade: '#6f4f37', belly: '#e2cbb0', inner: '#e79aa4' }, // brown
-    { fur: '#6b6460', shade: '#4a4441', belly: '#b9b1aa', inner: '#e3909e' }, // dark
+    { fur: '#f4efe7', shade: '#d8cdbf', belly: '#fffaf3', inner: '#f5a9b8', brow: '#7a6656' }, // snow white
+    { fur: '#d9a46c', shade: '#b07a46', belly: '#f8e6cc', inner: '#f2a0a8', brow: '#5a3518' }, // caramel
+    { fur: '#b3aca6', shade: '#8a827c', belly: '#ebe6e1', inner: '#eea2b1', brow: '#46403b' }, // grey
+    { fur: '#efdfc0', shade: '#cdb48a', belly: '#fffaf0', inner: '#f5aab4', brow: '#6f5532' }, // cream
+    { fur: '#9a7253', shade: '#6f4f37', belly: '#e2cbb0', inner: '#e79aa4', brow: '#3a2516' }, // brown
+    { fur: '#6b6460', shade: '#4a4441', belly: '#b9b1aa', inner: '#e3909e', brow: '#231d1a' }, // dark
 ];
 
-const C = { nose: '#ff7c96', teeth: '#ffffff', whisker: '#3b302a', blush: '#ff9cad', pad: '#f6a7b5', pack: '#7b6a3c', packDark: '#544826', strap: '#3e4826' };
+const C = { nose: '#ff6f8e', teeth: '#ffffff', whisker: '#3b302a', blush: '#ff8fa6', pad: '#f6a7b5', pack: '#7b6a3c', packDark: '#544826', strap: '#3e4826' };
+
+// the face in head space (origin at the centre of the head, the face looks along +z)
+const HEAD_R = 0.33;
+const EYE_X = 0.112, EYE_Y = 0.035, EYE_Z = 0.272;
+const BROW_Y = 0.168;
 
 const geometryCache = new Map();
 function cached(key, make) {
@@ -46,62 +55,76 @@ function cached(key, make) {
     return geometryCache.get(key);
 }
 
-/** Body: fluffy belly, haunches, feet with pink pads, the cotton tail and a little backpack with a carrot in it. Origin at the feet. */
+/** Body: a round little body with a belly, haunches, big floppy feet with pink beans, the cotton tail and a backpack with a carrot. Origin at the feet. */
 function bodyGeometry(f) {
     return cached(`body-${f.fur}`, () => {
         const parts = [];
-        const r = 0.33;
-        const body = fluffySphere(r, 0.07, 1.7, 24, 18);
-        body.scale(1, 1.06, 0.98);
-        paint(body, (x, y, z) => (z > r * 0.32 && y < r * 0.55 && Math.abs(x) < r * 0.7 ? f.belly : y < -r * 0.62 ? f.shade : f.fur));
-        body.translate(0, 0.42, 0);
+        const r = 0.27;
+        const body = fluffySphere(r, 0.08, 1.7, 24, 18);
+        body.scale(1.04, 1.02, 0.96);
+        paint(body, (x, y, z) => (z > r * 0.28 && y < r * 0.5 && Math.abs(x) < r * 0.72 ? f.belly : y < -r * 0.6 ? f.shade : f.fur));
+        body.translate(0, 0.35, 0);
         parts.push(body);
         for (const s of [-1, 1]) {
-            const haunch = fluffySphere(0.17, 0.08, 4 + s, 14, 10);
+            const haunch = fluffySphere(0.15, 0.09, 4 + s, 14, 10);
             haunch.scale(0.9, 1, 1.15);
-            haunch.translate(s * 0.2, 0.22, -0.06);
-            paint(haunch, (x, y) => (y < 0.12 ? f.shade : f.fur));
+            haunch.translate(s * 0.17, 0.19, -0.05);
+            paint(haunch, (x, y) => (y < 0.1 ? f.shade : f.fur));
             parts.push(haunch);
-            const foot = sphere(0.1, 12, 8);
-            foot.scale(0.85, 0.5, 1.75);
-            foot.translate(s * 0.16, 0.05, 0.1);
-            paint(foot, (x, y, z) => (z > 0.24 && y < 0.06 ? f.belly : f.shade));
+            // big cartoon feet
+            const foot = sphere(0.12, 14, 10);
+            foot.scale(0.95, 0.5, 2.1);
+            foot.translate(s * 0.15, 0.06, 0.13);
+            paint(foot, (x, y, z) => (z > 0.3 ? f.belly : y < 0.035 ? f.shade : f.fur));
             parts.push(foot);
-            const pad = sphere(0.04, 8, 6);
-            pad.scale(1, 0.35, 1);
-            pad.translate(s * 0.16, 0.015, 0.2);
+            for (let t = -1; t <= 1; t++) {
+                const toe = sphere(0.04, 8, 6);
+                toe.scale(1, 0.8, 1);
+                toe.translate(s * 0.15 + t * 0.045, 0.075, 0.355);
+                paint(toe, f.belly);
+                parts.push(toe);
+                // the beans under the toes (they show when the bunny tumbles)
+                const bean = sphere(0.022, 6, 4);
+                bean.scale(1, 0.4, 1);
+                bean.translate(s * 0.15 + t * 0.045, 0.012, 0.33);
+                paint(bean, C.pad);
+                parts.push(bean);
+            }
+            const pad = sphere(0.06, 8, 6);
+            pad.scale(1, 0.3, 1.3);
+            pad.translate(s * 0.15, 0.008, 0.18);
             paint(pad, C.pad);
             parts.push(pad);
         }
         // the cotton tail: a cluster of puffs
-        for (const [x, y, z, rr] of [[0, 0.34, -0.36, 0.09], [0.05, 0.38, -0.34, 0.06], [-0.05, 0.37, -0.35, 0.065], [0, 0.29, -0.33, 0.06], [0.02, 0.4, -0.31, 0.05]]) {
-            const puff = fluffySphere(rr, 0.12, x * 40, 10, 8);
+        for (const [x, y, z, rr] of [[0, 0.3, -0.3, 0.09], [0.05, 0.34, -0.28, 0.065], [-0.05, 0.33, -0.29, 0.07], [0, 0.25, -0.28, 0.06], [0.02, 0.37, -0.25, 0.05]]) {
+            const puff = fluffySphere(rr, 0.14, x * 40, 10, 8);
             puff.translate(x, y, z);
             paint(puff, f.belly);
             parts.push(puff);
         }
         // the backpack with a carrot
-        const pack = new THREE.BoxGeometry(0.24, 0.22, 0.11, 2, 2, 1);
-        pack.translate(0, 0.52, -0.33);
-        paint(pack, (x, y) => (y > 0.6 ? C.packDark : C.pack));
-        const flap = new THREE.BoxGeometry(0.25, 0.06, 0.12);
-        flap.translate(0, 0.62, -0.33);
+        const pack = new THREE.BoxGeometry(0.2, 0.18, 0.1, 2, 2, 1);
+        pack.translate(0, 0.42, -0.27);
+        paint(pack, (x, y) => (y > 0.5 ? C.packDark : C.pack));
+        const flap = new THREE.BoxGeometry(0.21, 0.05, 0.11);
+        flap.translate(0, 0.51, -0.27);
         paint(flap, C.packDark);
-        const carrot = new THREE.ConeGeometry(0.032, 0.2, 7);
+        const carrot = new THREE.ConeGeometry(0.03, 0.2, 7);
         carrot.rotateX(Math.PI);
-        carrot.rotateZ(0.3);
-        carrot.translate(0.07, 0.66, -0.34);
+        carrot.rotateZ(0.35);
+        carrot.translate(0.06, 0.56, -0.28);
         paint(carrot, '#f07a1a');
         const top = new THREE.ConeGeometry(0.03, 0.08, 4);
-        top.rotateZ(0.3);
-        top.translate(0.1, 0.79, -0.34);
+        top.rotateZ(0.35);
+        top.translate(0.095, 0.69, -0.28);
         paint(top, '#4f9e2f');
         parts.push(pack, flap, carrot, top);
         for (const s of [-1, 1]) {
-            const strap = new THREE.TorusGeometry(0.2, 0.014, 4, 12, Math.PI * 0.9);
+            const strap = new THREE.TorusGeometry(0.17, 0.013, 4, 12, Math.PI * 0.9);
             strap.rotateY(Math.PI / 2);
             strap.rotateX(-0.25);
-            strap.translate(s * 0.13, 0.5, -0.1);
+            strap.translate(s * 0.115, 0.42, -0.08);
             paint(strap, C.strap);
             parts.push(strap);
         }
@@ -109,83 +132,115 @@ function bodyGeometry(f) {
     });
 }
 
-/** Head (origin at its centre): fluffy head, cheeks, muzzle, buck teeth, whiskers, blush and the chin strap of the helmet. */
+/** Head (origin at its centre): a big fluffy head, puffy cheeks, the muzzle, two huge buck teeth, whiskers, blush and the chin strap. */
 function headGeometry(f) {
     return cached(`head-${f.fur}`, () => {
         const parts = [];
-        const head = fluffySphere(0.26, 0.05, 2.3, 22, 16);
-        head.scale(1.05, 0.95, 1);
-        paint(head, (x, y, z) => (z > 0.17 && y < 0.02 ? f.belly : y > 0.18 ? f.shade : f.fur));
+        const head = fluffySphere(HEAD_R, 0.045, 2.3, 26, 18);
+        head.scale(1.08, 0.95, 0.98);
+        paint(head, (x, y, z) => (z > 0.2 && y < -0.03 ? f.belly : y > 0.25 ? f.shade : f.fur));
         parts.push(head);
         for (const s of [-1, 1]) {
-            const cheek = fluffySphere(0.115, 0.1, s * 3, 12, 9);
-            cheek.translate(s * 0.12, -0.08, 0.13);
+            const cheek = fluffySphere(0.14, 0.1, s * 3, 12, 9);
+            cheek.translate(s * 0.15, -0.1, 0.17);
             paint(cheek, f.belly);
-            const blush = sphere(0.045, 8, 6);
-            blush.scale(1.2, 0.7, 0.4);
-            blush.translate(s * 0.16, -0.045, 0.205);
+            const blush = sphere(0.05, 8, 6);
+            blush.scale(1.25, 0.7, 0.4);
+            blush.translate(s * 0.205, -0.05, 0.255);
             paint(blush, C.blush);
             parts.push(cheek, blush);
             for (let w = 0; w < 3; w++) {
-                const whisker = new THREE.CylinderGeometry(0.0035, 0.002, 0.2, 3);
-                whisker.rotateZ(s * (Math.PI / 2 - 0.12 + w * 0.12));
+                const whisker = new THREE.CylinderGeometry(0.004, 0.002, 0.24, 3);
+                whisker.rotateZ(s * (Math.PI / 2 - 0.14 + w * 0.14));
                 whisker.rotateY(-s * 0.25);
-                whisker.translate(s * 0.15, -0.06 - w * 0.02 + 0.02, 0.24);
+                whisker.translate(s * 0.21, -0.08 - w * 0.022 + 0.022, 0.3);
                 paint(whisker, C.whisker);
                 parts.push(whisker);
             }
         }
-        const muzzle = sphere(0.085, 12, 8);
-        muzzle.scale(1.15, 0.85, 0.9);
-        muzzle.translate(0, -0.075, 0.2);
+        const muzzle = sphere(0.1, 12, 8);
+        muzzle.scale(1.2, 0.8, 0.9);
+        muzzle.translate(0, -0.11, 0.27);
         paint(muzzle, f.belly);
         parts.push(muzzle);
+        // two big buck teeth hanging over the mouth
         for (const s of [-1, 1]) {
-            const tooth = new THREE.BoxGeometry(0.024, 0.045, 0.014);
-            tooth.translate(s * 0.013, -0.145, 0.248);
-            paint(tooth, C.teeth);
+            const tooth = new THREE.BoxGeometry(0.042, 0.056, 0.016, 1, 2, 1);
+            tooth.translate(s * 0.023, -0.196, 0.336);
+            paint(tooth, (x, y) => (y < -0.215 ? '#f1ece2' : C.teeth));
             parts.push(tooth);
         }
-        const mouth = new THREE.BoxGeometry(0.06, 0.008, 0.01);
-        mouth.translate(0, -0.118, 0.262);
-        paint(mouth, '#7a3b3b');
-        parts.push(mouth);
         // the chin strap of the helmet
-        const strap = new THREE.TorusGeometry(0.262, 0.012, 4, 24, Math.PI);
+        const strap = new THREE.TorusGeometry(HEAD_R * 1.04, 0.012, 4, 24, Math.PI);
         strap.rotateZ(Math.PI);
-        strap.translate(0, 0.02, 0.04);
+        strap.translate(0, 0.07, 0.02);
         paint(strap, C.strap);
         parts.push(strap);
         return merge(parts);
     });
 }
 
-/** The eyes: big glossy irises with two highlights each (origin between the eyes, so they blink by scaling y). */
-function eyesGeometry() {
-    return cached('eyes', () => {
+/** The two big white eyeballs (googly: the pupils are their own meshes and wobble inside). Origin between the eyes. */
+function eyeballsGeometry() {
+    return cached('eyeballs', () => {
         const parts = [];
         for (const s of [-1, 1]) {
-            const eye = sphere(0.068, 14, 10);
-            eye.scale(0.78, 1, 0.55);
-            eye.translate(s * 0.105, 0, 0.2);
-            paint(eye, (x, y) => (y < -0.03 ? '#3a2416' : '#1a110b'));
-            const big = sphere(0.022, 8, 6);
-            big.translate(s * 0.105 + 0.018, 0.026, 0.235);
-            paint(big, '#ffffff');
-            const small = sphere(0.01, 6, 4);
-            small.translate(s * 0.105 - 0.016, -0.022, 0.236);
-            paint(small, '#ffffff');
-            parts.push(eye, big, small);
+            const eye = sphere(0.105, 18, 14);
+            eye.scale(0.86, 1.06, 0.55);
+            eye.translate(s * EYE_X, 0, EYE_Z);
+            paint(eye, (x, y) => (y < -0.075 ? '#e3e9f2' : '#ffffff'));
+            parts.push(eye);
         }
         return merge(parts);
     });
 }
 
+/** A pupil: a black disc with a big and a small highlight. Origin at its centre. */
+function pupilGeometry() {
+    return cached('pupil', () => {
+        const pupil = sphere(0.046, 14, 10);
+        pupil.scale(1, 1.12, 0.38);
+        paint(pupil, (x, y) => (y < -0.025 ? '#3a2416' : '#120b07'));
+        const big = sphere(0.016, 8, 6);
+        big.translate(0.014, 0.02, 0.016);
+        paint(big, '#ffffff');
+        const small = sphere(0.007, 6, 4);
+        small.translate(-0.016, -0.018, 0.016);
+        paint(small, '#ffffff');
+        return merge([pupil, big, small]);
+    });
+}
+
+/** An eyebrow: a thick fuzzy bar (origin at its middle). */
+function browGeometry(f) {
+    return cached(`brow-${f.brow}`, () => {
+        const brow = new THREE.CapsuleGeometry(0.018, 0.075, 3, 6);
+        brow.rotateZ(Math.PI / 2);
+        brow.scale(1, 1, 0.7);
+        paint(brow, f.brow);
+        return merge([brow]);
+    });
+}
+
+/** The mouth: a dark half-disc (origin at its top edge) with a pink tongue; it opens by scaling y. */
+function mouthGeometry() {
+    return cached('mouth', () => {
+        const hole = new THREE.SphereGeometry(0.085, 18, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+        hole.scale(1, 1, 0.42);
+        paint(hole, '#5c1622');
+        const tongue = sphere(0.05, 10, 8);
+        tongue.scale(1.15, 0.6, 0.55);
+        tongue.translate(0, -0.062, 0.014);
+        paint(tongue, (x) => (Math.abs(x) < 0.006 ? '#e85a72' : '#ff7d93'));
+        return merge([hole, tongue]);
+    });
+}
+
 function noseGeometry() {
     return cached('nose', () => {
-        const nose = sphere(0.036, 10, 8);
-        nose.scale(1.35, 0.85, 0.8);
-        paint(nose, (x, y) => (y > 0.012 ? '#ffb2c2' : C.nose));
+        const nose = sphere(0.046, 12, 8);
+        nose.scale(1.4, 0.9, 0.8);
+        paint(nose, (x, y) => (y > 0.016 ? '#ffb2c2' : C.nose));
         return merge([nose]);
     });
 }
@@ -193,49 +248,49 @@ function noseGeometry() {
 /** An ear segment: the outer fur and the pink inside; origin at its base. */
 function earGeometry(f, tip) {
     return cached(`ear-${f.fur}-${tip}`, () => {
-        const len = tip ? 0.17 : 0.2;
-        const r = tip ? 0.058 : 0.066;
+        const len = tip ? 0.2 : 0.23;
+        const r = tip ? 0.066 : 0.072;
         const outer = limb(r, len, 10);
         outer.scale(1, 1, 0.55);
         paint(outer, (x, y) => (tip && y > len * 0.85 ? f.shade : f.fur));
         const inner = limb(r * 0.58, len * 0.86, 8);
         inner.scale(1, 1, 0.4);
-        inner.translate(0, r * 0.25, 0.022);
+        inner.translate(0, r * 0.25, 0.024);
         paint(inner, f.inner);
         return merge([outer, inner]);
     });
 }
 
-/** An arm hanging down from the shoulder, with a round paw. */
+/** A short stubby arm hanging down from the shoulder, with a big round paw. */
 function armGeometry(f) {
     return cached(`arm-${f.fur}`, () => {
-        const arm = limb(0.055, 0.13, 8);
+        const arm = limb(0.05, 0.09, 8);
         arm.rotateX(Math.PI);
         paint(arm, f.fur);
-        const paw = sphere(0.07, 10, 8);
+        const paw = sphere(0.075, 10, 8);
         paw.scale(1, 0.9, 1.05);
-        paw.translate(0, -0.25, 0.01);
+        paw.translate(0, -0.21, 0.01);
         paint(paw, f.belly);
         return merge([arm, paw]);
     });
 }
 
-/** The army helmet (tinted by the team colour; the vertex colours make the band darker), with a camouflage sprig. */
+/** The army helmet, a size too big (tinted by the team colour; the vertex colours make the band darker), with a camouflage sprig. */
 function helmetGeometry() {
     return cached('helmet', () => {
-        const dome = new THREE.SphereGeometry(0.29, 22, 10, 0, Math.PI * 2, 0, Math.PI * 0.47);
-        dome.scale(1, 0.84, 1.06);
+        const dome = new THREE.SphereGeometry(0.345, 24, 10, 0, Math.PI * 2, 0, Math.PI * 0.47);
+        dome.scale(1.02, 0.8, 1.04);
         paint(dome, (x, y) => (y < 0.035 ? '#8a8a8a' : '#ffffff'));
-        const brim = new THREE.CylinderGeometry(0.315, 0.32, 0.03, 24);
+        const brim = new THREE.CylinderGeometry(0.37, 0.38, 0.035, 26);
         brim.scale(1, 1, 1.08);
         paint(brim, '#c4c4c4');
-        const band = new THREE.TorusGeometry(0.287, 0.018, 5, 26);
+        const band = new THREE.TorusGeometry(0.342, 0.02, 5, 28);
         band.rotateX(Math.PI / 2);
-        band.scale(1, 1, 1.06);
-        band.translate(0, 0.04, 0);
+        band.scale(1.02, 1, 1.05);
+        band.translate(0, 0.045, 0);
         paint(band, '#b0b0b0');
-        const rivet = sphere(0.018, 6, 4);
-        rivet.translate(0, 0.07, 0.3);
+        const rivet = sphere(0.02, 6, 4);
+        rivet.translate(0, 0.08, 0.355);
         paint(rivet, '#d9d9d9');
         return merge([dome, brim, band, rivet]);
     });
@@ -245,14 +300,27 @@ function sprigGeometry() {
     return cached('sprig', () => {
         const parts = [];
         for (let i = 0; i < 3; i++) {
-            const leaf = sphere(0.045, 7, 5);
+            const leaf = sphere(0.05, 7, 5);
             leaf.scale(0.45, 1.6, 0.18);
-            leaf.translate(0, 0.07, 0);
+            leaf.translate(0, 0.08, 0);
             leaf.rotateZ(-0.5 + i * 0.45);
-            leaf.translate(-0.18, 0.12, -0.12);
+            leaf.translate(-0.22, 0.14, -0.14);
             paint(leaf, i === 1 ? '#86c84a' : '#4f9e2f');
             parts.push(leaf);
         }
+        // a little flower stuck in the band
+        for (let p = 0; p < 5; p++) {
+            const a = (p / 5) * Math.PI * 2;
+            const petal = sphere(0.022, 6, 4);
+            petal.scale(1, 1, 0.4);
+            petal.translate(0.24 + Math.cos(a) * 0.026, 0.1 + Math.sin(a) * 0.026, 0.25);
+            paint(petal, '#ffffff');
+            parts.push(petal);
+        }
+        const heart = sphere(0.016, 6, 4);
+        heart.translate(0.24, 0.1, 0.258);
+        paint(heart, '#ffd23a');
+        parts.push(heart);
         return merge(parts);
     });
 }
@@ -260,33 +328,99 @@ function sprigGeometry() {
 /** The knitted scarf around the neck (team colour; stripes by vertex colour) with a tail that hangs down. */
 function scarfGeometry() {
     return cached('scarf', () => {
-        const ring = new THREE.TorusGeometry(0.2, 0.058, 8, 24);
+        const ring = new THREE.TorusGeometry(0.17, 0.055, 8, 24);
         ring.rotateX(Math.PI / 2);
-        ring.scale(1, 1, 1.05);
-        ring.translate(0, 0.69, 0.03);
-        paint(ring, (x, y, z) => (Math.floor((Math.atan2(z - 0.03, x) + Math.PI) / (Math.PI / 8)) % 2 ? '#ffffff' : '#d8d8d8'));
-        const knot = sphere(0.06, 8, 6);
-        knot.translate(0.12, 0.66, 0.16);
+        ring.scale(1.05, 1, 1.05);
+        ring.translate(0, 0.6, 0.02);
+        paint(ring, (x, y, z) => (Math.floor((Math.atan2(z - 0.02, x) + Math.PI) / (Math.PI / 8)) % 2 ? '#ffffff' : '#d8d8d8'));
+        const knot = sphere(0.058, 8, 6);
+        knot.translate(0.11, 0.58, 0.15);
         paint(knot, '#e6e6e6');
-        const tail = new THREE.BoxGeometry(0.09, 0.26, 0.03, 1, 4, 1);
-        tail.translate(0, -0.13, 0);
-        tail.rotateZ(0.25);
-        tail.rotateX(-0.25);
-        tail.translate(0.15, 0.66, 0.17);
+        const tail = new THREE.BoxGeometry(0.085, 0.22, 0.03, 1, 4, 1);
+        tail.translate(0, -0.11, 0);
+        tail.rotateZ(0.3);
+        tail.rotateX(-0.3);
+        tail.translate(0.14, 0.58, 0.16);
         paint(tail, (x, y) => (Math.floor(y * 30) % 2 ? '#ffffff' : '#d0d0d0'));
-        const fringe = new THREE.BoxGeometry(0.09, 0.04, 0.032);
-        fringe.translate(0, -0.28, 0);
-        fringe.rotateZ(0.25);
-        fringe.rotateX(-0.25);
-        fringe.translate(0.15, 0.66, 0.17);
+        const fringe = new THREE.BoxGeometry(0.085, 0.04, 0.032);
+        fringe.translate(0, -0.24, 0);
+        fringe.rotateZ(0.3);
+        fringe.rotateX(-0.3);
+        fringe.translate(0.14, 0.58, 0.16);
         paint(fringe, '#bdbdbd');
         return merge([ring, knot, tail, fringe]);
+    });
+}
+
+/** A crossed plaster (origin at its middle, facing +z). */
+function plasterGeometry() {
+    return cached('plaster', () => {
+        const parts = [];
+        for (const a of [-0.65, 0.65]) {
+            const strip = new THREE.BoxGeometry(0.15, 0.045, 0.012);
+            strip.rotateZ(a);
+            paint(strip, '#efbf8a');
+            parts.push(strip);
+        }
+        const pad = new THREE.BoxGeometry(0.045, 0.045, 0.018);
+        pad.rotateZ(Math.PI / 4);
+        paint(pad, '#fff0da');
+        parts.push(pad);
+        return merge(parts);
+    });
+}
+
+/** A gauze bandage wrapped around the base of an ear, with a little bow. */
+function bandageGeometry() {
+    return cached('bandage', () => {
+        const wrap = new THREE.CylinderGeometry(0.082, 0.085, 0.09, 12, 2, true);
+        wrap.scale(1, 1, 0.62);
+        paint(wrap, (x, y) => (Math.abs(y) < 0.008 ? '#e6e0d2' : '#fbf8f0'));
+        const bowL = sphere(0.03, 6, 4);
+        bowL.scale(1.4, 0.8, 0.5);
+        bowL.translate(-0.03, 0.02, 0.06);
+        const bowR = bowL.clone();
+        bowR.translate(0.06, 0, 0);
+        paint(bowL, '#fbf8f0');
+        paint(bowR, '#fbf8f0');
+        return merge([wrap, bowL, bowR]);
+    });
+}
+
+/** A five-pointed star (flat, extruded), origin at its centre. */
+function starShape(r) {
+    const s = new THREE.Shape();
+    for (let i = 0; i < 10; i++) {
+        const a = Math.PI / 2 + (i / 10) * Math.PI * 2;
+        const rr = i % 2 ? r * 0.45 : r;
+        if (i === 0) s.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+        else s.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    s.closePath();
+    return s;
+}
+
+/** The dizzy ring: four little stars circling the head. */
+function starsGeometry() {
+    return cached('stars', () => {
+        const parts = [];
+        for (let i = 0; i < 4; i++) {
+            const star = new THREE.ExtrudeGeometry(starShape(i % 2 ? 0.06 : 0.075), { depth: 0.02, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 1 });
+            star.translate(0, 0, -0.01);
+            const a = (i / 4) * Math.PI * 2;
+            star.rotateY(a + Math.PI / 2);
+            star.translate(Math.cos(a) * 0.34, (i % 2) * 0.05, Math.sin(a) * 0.34);
+            paint(star, (x, y, z) => (y > (i % 2) * 0.05 + 0.02 ? '#fff6a8' : '#ffcf2e'));
+            parts.push(star);
+        }
+        return merge(parts);
     });
 }
 
 const eyeMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.18, metalness: 0.05 });
 const noseMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4 });
 const plainMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+const starMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
 
 const teamMaterials = new Map();
 function teamMaterial(color) {
@@ -294,19 +428,49 @@ function teamMaterial(color) {
     return teamMaterials.get(color);
 }
 
-function part(geometry, material, parent, x = 0, y = 0, z = 0) {
+function part(geometry, material, parent, x = 0, y = 0, z = 0, shadow = true) {
     const m = new THREE.Mesh(geometry, material);
     m.position.set(x, y, z);
-    m.castShadow = true;
+    m.castShadow = shadow;
     parent?.add(m);
     return m;
 }
 
+// ---------------------------------------------------------------- what bunnies say (German, short; the game is German)
+
+const QUIPS = {
+    hurt: ['Aua!', 'Meine Löffel!', 'Das gibt Rache!', 'Nicht ins Fell!', 'Autsch!', 'Uff!', 'Das kitzelt nur!', 'Hey, ich war frisch gekämmt!', 'Mein schöner Helm!', 'Sterne … so viele Sterne …'],
+    fly: ['Aaaaah!', 'Ich kann fliegen!', 'Huiii!', 'Mamaaa!', 'Nicht schon wieder!', 'Wo ist unten?', 'Hilfeee!'],
+    land: ['Uff!', 'Gelandet!', 'Alles noch dran?', 'Zehn Punkte!'],
+    fire: ['Fang!', 'Möhre frei!', 'Iss dein Gemüse!', 'Für die Möhre!', 'Hoppla hopp!', 'Achtung, Vitamine!', 'Frisch vom Feld!'],
+    die: ['Ich komm wieder …', 'Tschüss, Möhrchen …', 'Sagt meiner Mama …', 'Das war\'s mit mir', 'Bis gleich im Hasenhimmel!', 'Unfair …'],
+    sink: ['Blubb!', 'Ich kann nicht schwimmen!', 'Blubb … blubb …', 'Zu nass!'],
+    greet: ['Huhu!', 'Na, du?', 'Ich seh dich!', 'Möhre gefällig?', 'Hoppel hoppel!', 'Alles klar?'],
+    yawn: ['Gääähn …', 'Wann bin ich dran?', 'Langweilig …'],
+    sneeze: ['Hatschi!', 'Hatschuuu!'],
+    hiccup: ['Hicks!', 'Hick!'],
+    cheer: ['Juhuu!', 'Gewonnen!', 'Wer ist hier der Boss?', 'Möhren für alle!'],
+};
+
+const pick = list => list[Math.floor(Math.random() * list.length)];
+
+// ---------------------------------------------------------------- animation helpers
+
 const KINDS = ['Projectile', 'Grenade', 'Cluster', 'Hitscan', 'Airstrike'];
 const LOOPS = new Set(['idle', 'walk', 'aim', 'cheer', 'dance', 'wave', 'eat']);
-const ONCE = { fire: 0.55, hurt: 0.55 };
+const ONCE = { fire: 0.55, hurt: 0.6 };
+const FIDGETS = ['yawn', 'scratch', 'hiccup', 'lookcam', 'lookcam', 'polish', 'sneeze', 'raspberry', 'stretch'];
+const FIDGET_SECONDS = { yawn: 1.9, scratch: 1.7, hiccup: 1.7, lookcam: 2.3, polish: 1.8, sneeze: 1.5, raspberry: 1.4, stretch: 1.6 };
 const smooth = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
 const easeOutBack = t => 1 + 2.4 * Math.pow(t - 1, 3) + 1.4 * Math.pow(t - 1, 2);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** Where the camera is (the head of every bunny records it when it is drawn): the googly eyes look at the player. */
+const viewer = new THREE.Vector3(0, 6, 14);
+function recordViewer(renderer, scene, camera) {
+    if (camera.isPerspectiveCamera) viewer.copy(camera.position);
+}
 
 /** A soft ear: a spring for the tip (angle around x) that lags behind the motion of the head. */
 class EarSpring {
@@ -321,6 +485,31 @@ class EarSpring {
         this.x += this.v * dt;
         this.x = Math.max(-1.6, Math.min(1.2, this.x));
         return this.x;
+    }
+}
+
+/** A googly pupil: a 2D spring inside the eyeball (−1 .. 1), shaken by the hops. */
+class PupilSpring {
+    constructor() {
+        this.x = 0;
+        this.y = 0;
+        this.vx = 0;
+        this.vy = 0;
+    }
+
+    step(dt, tx, ty, push) {
+        const k = 230, damping = 9;
+        this.vx += (-(this.x - tx) * k - this.vx * damping) * dt;
+        this.vy += (-(this.y - ty) * k - this.vy * damping + push) * dt;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        const r = Math.hypot(this.x, this.y);
+        if (r > 1) {
+            this.x /= r;
+            this.y /= r;
+            this.vx *= 0.4;
+            this.vy *= 0.4;
+        }
     }
 }
 
@@ -370,28 +559,40 @@ export class Bunny {
         this.lookYaw = 0;
         this.lookTarget = 0;
         this.headYaw = 0;
+        this.gazeMode = 'camera';
+        this.glanceX = 0;
+        this.glanceY = 0;
         this.ears = [new EarSpring(), new EarSpring()];
+        this.pupilSprings = [new PupilSpring(), new PupilSpring()];
+        this.fidget = null; // { name, t, d } an idle fidget
+        this.fidgetIn = 2.5 + Math.random() * 5;
+        this.soot = 0; // a sooty face after a blast, fades
+        this.dizzy = 0; // seconds of stars around the head
+        this.helmetPop = null; // { t, height } the helmet jumps off and lands again
+        this.lastSlap = -10;
+        this.lastQuip = -10;
+        this.bubble = null;
         this.fx = null;
 
         this.root = new THREE.Group();
         this.root.name = `bunny-${this.id}`;
         this.spinner = new THREE.Group(); // tumbles around the middle of the body
-        this.spinner.position.y = 0.45;
+        this.spinner.position.y = 0.5;
         this.root.add(this.spinner);
         this.model = new THREE.Group();
-        this.model.position.y = -0.45;
+        this.model.position.y = -0.5;
         this.model.rotation.order = 'YXZ';
         this.spinner.add(this.model);
         this.buildModel();
 
         this.label = new Label(this.name, this.color);
-        this.label.sprite.position.y = 1.78;
+        this.label.sprite.position.y = 1.92;
         this.root.add(this.label.sprite);
         this.label.set(this.health, this.maxHealth, true);
 
-        this.aimDots = null;
         this.grave = null;
         this.ghost = null;
+        this.updatePlasters();
         this.sync();
         if (!this.alive) this.die(false);
     }
@@ -405,38 +606,63 @@ export class Bunny {
         this.scarf = part(scarfGeometry(), team, this.model);
 
         this.neck = new THREE.Group(); // turns and tilts the head
-        this.neck.position.set(0, 0.76, 0.05);
+        this.neck.position.set(0, 0.62, 0.04);
         this.neck.rotation.order = 'YXZ';
         this.model.add(this.neck);
         this.head = new THREE.Group();
-        this.head.position.set(0, 0.13, 0.02);
+        this.head.position.set(0, 0.27, 0.02);
         this.neck.add(this.head);
-        part(headGeometry(f), this.furMaterial, this.head).receiveShadow = true;
-        this.eyes = part(eyesGeometry(), eyeMaterial, this.head, 0, 0.035, 0);
-        this.eyes.castShadow = false;
-        this.nose = part(noseGeometry(), noseMaterial, this.head, 0, -0.02, 0.272);
-        this.helmet = part(helmetGeometry(), team, this.head, 0, 0.075, -0.015);
-        this.helmet.rotation.x = -0.12;
-        part(sprigGeometry(), plainMaterial, this.helmet);
+        const headMesh = part(headGeometry(f), this.furMaterial, this.head);
+        headMesh.receiveShadow = true;
+        headMesh.onBeforeRender = recordViewer;
+
+        // googly eyes: the eyeballs blink by scaling y, the pupils wobble inside
+        this.eyes = new THREE.Group();
+        this.eyes.position.y = EYE_Y;
+        this.head.add(this.eyes);
+        part(eyeballsGeometry(), eyeMaterial, this.eyes, 0, 0, 0, false);
+        this.pupils = [-1, 1].map(s => part(pupilGeometry(), eyeMaterial, this.eyes, s * EYE_X, 0, EYE_Z + 0.052, false));
+        this.brows = [-1, 1].map(s => {
+            const brow = part(browGeometry(f), plainMaterial, this.head, s * EYE_X, BROW_Y, 0.3, false);
+            brow.userData.side = s;
+            return brow;
+        });
+        this.nose = part(noseGeometry(), noseMaterial, this.head, 0, -0.055, 0.35, false);
+        this.mouth = part(mouthGeometry(), noseMaterial, this.head, 0, -0.172, 0.31, false);
+        this.mouth.scale.set(1, 0.3, 1);
+
+        this.helmet = new THREE.Group();
+        this.helmet.position.set(0, 0.23, -0.05);
+        this.helmet.rotation.order = 'ZXY';
+        this.head.add(this.helmet);
+        part(helmetGeometry(), team, this.helmet);
+        part(sprigGeometry(), plainMaterial, this.helmet, 0, 0, 0, false);
 
         // the ears: a base and a tip each, the tips are springs
         this.earNodes = [-1, 1].map(s => {
             const base = new THREE.Group();
-            base.position.set(s * 0.1, 0.19, -0.04);
+            base.position.set(s * 0.12, 0.26, -0.05);
             base.rotation.order = 'ZXY';
             this.head.add(base);
             part(earGeometry(f, false), this.furMaterial, base);
             const tip = new THREE.Group();
-            tip.position.y = 0.24;
+            tip.position.y = 0.28;
             tip.rotation.order = 'ZXY';
             base.add(tip);
             part(earGeometry(f, true), this.furMaterial, tip);
             return { base, tip, side: s };
         });
 
+        // slapstick: plasters for a battered bunny, the dizzy stars
+        this.plaster = part(plasterGeometry(), plainMaterial, this.head, -0.205, -0.085, 0.285, false);
+        this.plaster.rotation.set(-0.1, -0.5, 0.3);
+        this.bandage = part(bandageGeometry(), plainMaterial, this.earNodes[1].base, 0, 0.12, 0, false);
+        this.stars = part(starsGeometry(), starMaterial, this.head, 0, 0.52, -0.02, false);
+        this.stars.visible = false;
+
         this.arms = [-1, 1].map(s => {
             const shoulder = new THREE.Group();
-            shoulder.position.set(s * 0.215, 0.62, 0.09);
+            shoulder.position.set(s * 0.2, 0.52, 0.08);
             shoulder.rotation.order = 'XZY';
             this.model.add(shoulder);
             part(armGeometry(f), this.furMaterial, shoulder);
@@ -444,11 +670,11 @@ export class Bunny {
         });
 
         this.weaponPivot = new THREE.Group(); // between the paws, tilts with the aim
-        this.weaponPivot.position.set(0, 0.56, 0.2);
+        this.weaponPivot.position.set(0, 0.47, 0.22);
         this.model.add(this.weaponPivot);
         this.weapon = null;
         this.snack = snackModel();
-        this.snack.position.set(0, 0.73, 0.33);
+        this.snack.position.set(0, 0.66, 0.36);
         this.snack.visible = false;
         this.model.add(this.snack);
     }
@@ -460,6 +686,14 @@ export class Bunny {
         if (health === this.health) return;
         this.health = health;
         this.label.set(Math.max(0, health), this.maxHealth);
+        this.updatePlasters();
+    }
+
+    /** A plaster on the cheek below 60 % health, a bandaged ear below 30 %. */
+    updatePlasters() {
+        const share = this.health / Math.max(1, this.maxHealth);
+        this.plaster.visible = this.alive && share < 0.6;
+        this.bandage.visible = this.alive && share < 0.3;
     }
 
     /** Puts the bunny where the server says, at once. */
@@ -497,23 +731,67 @@ export class Bunny {
         this.label.sprite.visible = visible && this.alive;
     }
 
+    // ------------------------------------------------------------ speech
+
+    /** A speech bubble above the head for a few seconds (replaces the one shown). */
+    say(text, seconds = 2.2) {
+        if (!text) return;
+        if (!this.bubble) {
+            this.bubble = new Bubble(this);
+            this.root.add(this.bubble.sprite);
+        }
+        this.bubble.show(String(text), seconds);
+        this.lastQuip = this.clock;
+    }
+
+    /** Says something of a list now and then (chance 0..1); never while another bubble is up, right after one or without labels (menu). */
+    quip(kind, chance = 0.5, force = false) {
+        const list = QUIPS[kind];
+        if (!list) return;
+        // the menu hides the labels and blurs the island: no chatter there
+        if (!force && (this.labelHidden || Math.random() > chance || this.bubble?.active || this.clock - this.lastQuip < 2.5)) return;
+        this.say(pick(list), kind === 'die' ? 2.6 : 1.8);
+    }
+
     // ------------------------------------------------------------ animations
 
     play(name) {
         if (!this.alive) return;
         if (ONCE[name]) {
             this.once = { name, t: 0, duration: name === 'fire' && this.weaponKind === 'Airstrike' ? 1.1 : ONCE[name] };
-            if (name === 'hurt') this.flash = 1;
+            if (name === 'hurt') {
+                this.flash = 1;
+                this.slapstick(this.pendingHurt ?? 20);
+                this.pendingHurt = null;
+            }
+            if (name === 'fire') this.quip('fire', 0.3);
+            this.fidget = null;
             return;
         }
         if (LOOPS.has(name) && name !== this.anim) {
             this.anim = name;
             this.animTime = 0;
+            this.fidget = null;
+            if (name === 'cheer') this.quip('cheer', 0.4);
         }
     }
 
-    hurt() {
+    hurt(amount) {
+        this.pendingHurt = amount ?? 20;
         this.play('hurt');
+    }
+
+    /** Soot on the face, stars around the head, maybe the helmet pops off, and a word about it (once per hit, even when two callers report it). */
+    slapstick(amount) {
+        if (this.clock - this.lastSlap < 0.3) return;
+        this.lastSlap = this.clock;
+        this.soot = Math.min(1, this.soot + 0.55 + amount / 90);
+        this.dizzy = Math.max(this.dizzy, 2.2 + Math.min(2, amount / 30));
+        if (amount >= 25 || Math.random() < 0.45) this.helmetPop = { t: 0, height: 0.35 + Math.min(0.35, amount / 140) };
+        const at = this.position.clone();
+        at.y += 1.0;
+        this.particles()?.emit(at, { count: 5, speed: 0.9, up: 1, colors: [0x8a847e, 0xa49d96, 0x6a6560], life: 0.7, gravity: -0.2, spread: 0.3, size: 0.2, grow: 1.6, fade: true, drag: 2 });
+        this.quip('hurt', 0.55);
     }
 
     setWeapon(kind) {
@@ -536,9 +814,11 @@ export class Bunny {
 
     setFlight(vx, vy, vz) {
         const speed = Math.hypot(vx, vy, vz);
-        if (!this.flight) this.flight = { angle: 0, axis: new THREE.Vector3(1, 0, 0) };
-        const horizontal = new THREE.Vector3(vx, 0, vz);
-        if (horizontal.lengthSq() > 1e-4) this.flight.axis.set(vz, 0, -vx).normalize();
+        if (!this.flight) {
+            this.flight = { angle: 0, axis: new THREE.Vector3(1, 0, 0) };
+            this.quip('fly', 0.55);
+        }
+        if (vx * vx + vz * vz > 1e-4) this.flight.axis.set(vz, 0, -vx).normalize();
         this.flight.speed = speed;
     }
 
@@ -547,7 +827,9 @@ export class Bunny {
         this.flight = null;
         this.spinner.quaternion.identity();
         this.squash = 1;
+        this.dizzy = Math.max(this.dizzy, 1.6);
         this.dust(10);
+        this.quip('land', 0.3);
     }
 
     die(animate = true) {
@@ -557,6 +839,8 @@ export class Bunny {
         this.setAim(null);
         this.flight = null;
         this.spinner.quaternion.identity();
+        this.stars.visible = false;
+        this.updatePlasters();
         if (!this.grave) {
             this.grave = gravestoneModel();
             this.grave.rotation.y = this.yaw;
@@ -566,6 +850,7 @@ export class Bunny {
             this.dying = { t: 0 };
             this.grave.scale.setScalar(0.001);
             this.grave.visible = true;
+            this.quip('die', 0.85, !this.labelHidden && Math.random() < 0.85);
         } else {
             this.model.visible = false;
             this.grave.scale.setScalar(1);
@@ -579,6 +864,7 @@ export class Bunny {
         this.label.sprite.visible = false;
         this.setAim(null);
         this.flight = null;
+        this.stars.visible = false;
         if (!this.grave) {
             this.grave = gravestoneModel();
             this.root.add(this.grave);
@@ -586,12 +872,15 @@ export class Bunny {
         this.grave.visible = false;
         this.dying = null;
         this.sinking = { t: 0 };
+        this.quip('sink', 0.9, !this.labelHidden);
     }
 
-    /** The dotted aim line (an array of Vector3, null hides it); puts the bunny into its aim pose. */
-    setAim(points, color) {
+    /**
+     * Puts the bunny into its aim pose for a while (points: the start of the flight as Vector3, null ends it); the weapon tilts with the line.
+     * The visible aim line and the impact marker are drawn by AimGuide (aim.js), not here.
+     */
+    setAim(points) {
         if (!points || points.length < 2) {
-            if (this.aimDots) this.aimDots.visible = false;
             this.aimUntil = -1;
             return;
         }
@@ -599,40 +888,6 @@ export class Bunny {
         const a = points[0], b = points[Math.min(points.length - 1, 2)];
         const horizontal = Math.hypot(b.x - a.x, b.z - a.z);
         if (horizontal > 1e-4 || Math.abs(b.y - a.y) > 1e-4) this.setAimPitch(Math.atan2(b.y - a.y, horizontal));
-        if (!this.root.parent) return;
-        if (!this.aimDots) {
-            this.aimDots = new THREE.InstancedMesh(dotGeometry, new THREE.MeshBasicMaterial({ color: color ?? this.color, transparent: true, opacity: 0.92, depthWrite: false }), MAX_DOTS);
-            this.aimDots.frustumCulled = false;
-            this.aimDots.renderOrder = 5;
-        }
-        if (this.aimDots.parent !== this.root.parent) this.root.parent.add(this.aimDots);
-        if (color) this.aimDots.material.color.set(color);
-        this.aimDots.visible = true;
-        // dots at equal steps along the polyline, smaller towards the end
-        const step = 0.2;
-        let count = 0, carry = 0;
-        const m = new THREE.Matrix4();
-        const p = new THREE.Vector3();
-        let total = 0;
-        for (let i = 1; i < points.length; i++) total += points[i].distanceTo(points[i - 1]);
-        let walked = 0;
-        for (let i = 1; i < points.length && count < MAX_DOTS; i++) {
-            const from = points[i - 1], to = points[i];
-            const len = from.distanceTo(to);
-            let d = carry;
-            while (d <= len && count < MAX_DOTS) {
-                p.copy(from).lerp(to, len > 0 ? d / len : 0);
-                const k = 1 - (walked + d) / Math.max(total, 0.01);
-                const s = 0.35 + 0.65 * k;
-                m.makeScale(s, s, s).setPosition(p);
-                this.aimDots.setMatrixAt(count++, m);
-                d += step;
-            }
-            carry = d - len;
-            walked += len;
-        }
-        this.aimDots.count = count;
-        this.aimDots.instanceMatrix.needsUpdate = true;
     }
 
     dust(count = 6) {
@@ -663,6 +918,7 @@ export class Bunny {
         this.yaw += d * (1 - Math.exp(-dt * 14));
         this.sync();
         this.label.update(dt);
+        this.bubble?.update(dt);
 
         if (!this.alive) {
             this.updateDead(dt);
@@ -673,24 +929,34 @@ export class Bunny {
         this.apply(pose, dt);
     }
 
-    /** Computes the pose of this frame: the loop, a one-shot on top, the hops, the flight. */
+    /** The angle from where the bunny (plus extra yaw) looks to the camera, −π .. π (0: it looks right at it). */
+    viewerAngle(extra = 0) {
+        return wrap(Math.atan2(viewer.x - this.position.x, viewer.z - this.position.z) - this.yaw - extra);
+    }
+
+    /** Computes the pose of this frame: the loop, a one-shot on top, the hops, the flight, the face. */
     pose(dt) {
         const t = (this.animTime += dt);
         const c = this.clock;
         const p = {
             y: 0, sx: 1, sy: 1, lean: 0, roll: 0, twist: 0, headX: 0, headY: 0, headZ: 0,
-            armL: { x: -0.2, z: -0.18 }, armR: { x: -0.2, z: 0.18 }, earBack: -0.12, earSpread: 0.16, earPush: 0,
+            armL: { x: -0.2, z: -0.2 }, armR: { x: -0.2, z: 0.2 }, earBack: -0.12, earSpread: 0.18, earPush: 0,
             weapon: false, weaponPitch: 0, kick: 0, snack: false, eyes: 1,
+            // the face: brows up/down and tilted (+ angry, − worried), the mouth open 0 .. 1.3 and its width, where the pupils look, their size
+            browY: 0, browTilt: 0, browSkew: 0, mouth: 0.3, mouthW: 1, mouthRot: 0, mouthX: 0, gaze: this.gazeMode, gazeY: 0, pupil: 1, helmetRub: 0,
         };
 
         // breathing, looking around
-        const breath = Math.sin(c * 1.9) * 0.018;
+        const breath = Math.sin(c * 1.9) * 0.02;
         p.sy += breath;
         p.sx -= breath * 0.5;
         this.lookIn -= dt;
         if (this.lookIn <= 0) {
-            this.lookIn = 2.5 + Math.random() * 4;
+            this.lookIn = 2 + Math.random() * 3.5;
             this.lookTarget = Math.random() < 0.35 ? 0 : (Math.random() - 0.5) * 1.1;
+            this.gazeMode = Math.random() < 0.5 ? 'camera' : 'free';
+            this.glanceX = (Math.random() - 0.5) * 1.6;
+            this.glanceY = (Math.random() - 0.5) * 0.9;
         }
         this.lookYaw = smooth(this.lookYaw, this.lookTarget, 4, dt);
 
@@ -707,16 +973,20 @@ export class Bunny {
 
         switch (loop) {
             case 'walk': {
-                this.hop += dt / 0.34;
+                this.hop += dt / 0.32;
                 const ph = this.hop % 1;
                 const air = Math.sin(Math.PI * ph);
-                p.y = air * 0.16;
-                p.sy *= ph < 0.12 || ph > 0.92 ? 0.86 : 1 + air * 0.08;
-                p.sx *= ph < 0.12 || ph > 0.92 ? 1.08 : 1 - air * 0.04;
-                p.lean = 0.16;
-                p.armL.x = p.armR.x = 0.5 - air * 0.6;
-                p.earBack = -0.35;
+                p.y = air * 0.2;
+                p.sy *= ph < 0.12 || ph > 0.92 ? 0.8 : 1 + air * 0.12;
+                p.sx *= ph < 0.12 || ph > 0.92 ? 1.12 : 1 - air * 0.06;
+                p.lean = 0.18;
+                p.armL.x = p.armR.x = 0.6 - air * 0.9;
+                p.armL.z = -0.35 - air * 0.4;
+                p.armR.z = 0.35 + air * 0.4;
+                p.earBack = -0.4;
                 p.headY = 0;
+                p.mouth = 0.4;
+                p.gaze = 'forward';
                 const cycle = Math.floor(this.hop);
                 if (cycle !== this.lastHopCycle) {
                     this.lastHopCycle = cycle;
@@ -725,35 +995,53 @@ export class Bunny {
                 break;
             }
             case 'aim':
+                // concentrating: angry brows, squinting, the tongue in the corner of the mouth
                 p.weapon = true;
                 p.lean = -0.05;
                 p.headY = 0;
                 p.headX = -this.aimPitch * 0.35;
+                p.browTilt = 0.42;
+                p.browY = -0.012;
+                p.browSkew = 0.012;
+                p.eyes = 0.78;
+                p.mouth = 0.34;
+                p.mouthW = 0.68;
+                p.mouthRot = 0.38;
+                p.mouthX = 0.035;
+                p.gaze = 'forward';
+                p.gazeY = clamp(this.aimPitch * 0.9, -0.6, 0.8);
                 break;
             case 'cheer': {
                 const ph = (t / 0.7) % 1;
                 const air = Math.max(0, Math.sin(Math.PI * Math.min(1, ph / 0.75)));
-                p.y = air * 0.38;
-                p.sy *= ph > 0.9 ? 0.85 : 1 + air * 0.1;
+                p.y = air * 0.42;
+                p.sy *= ph > 0.9 ? 0.8 : 1 + air * 0.14;
                 p.armL = { x: -0.3, z: -2.5 + Math.sin(t * 14) * 0.25 };
                 p.armR = { x: -0.3, z: 2.5 - Math.sin(t * 14) * 0.25 };
                 p.twist = Math.floor(t / 0.7) % 3 === 2 ? ph * Math.PI * 2 : 0;
                 p.headX = -0.25;
                 p.earBack = 0.05;
-                p.eyes = 0.55; // happy squint
+                p.eyes = 0.45; // happy squint
+                p.mouth = 1.05;
+                p.browY = 0.035;
+                p.browTilt = -0.15;
                 break;
             }
             case 'dance': {
                 const beat = t * 2.4;
                 const side = Math.sin(beat * Math.PI);
-                p.y = Math.abs(Math.sin(beat * Math.PI)) * 0.12;
-                p.roll = side * 0.22;
+                p.y = Math.abs(Math.sin(beat * Math.PI)) * 0.14;
+                p.roll = side * 0.24;
                 p.twist = Math.sin(beat * Math.PI * 0.5) * 0.5;
                 p.armL = { x: -0.4, z: Math.floor(beat) % 2 ? -2.6 : -0.6 };
                 p.armR = { x: -0.4, z: Math.floor(beat) % 2 ? 0.6 : 2.6 };
-                p.headZ = -side * 0.25;
+                p.headZ = -side * 0.28;
                 p.headX = Math.sin(beat * Math.PI * 2) * 0.12;
                 p.earSpread = 0.3 + side * 0.2;
+                p.mouth = 0.6 + Math.abs(side) * 0.3;
+                p.eyes = Math.floor(beat / 2) % 2 ? 0.45 : 1;
+                p.browY = 0.03;
+                p.browSkew = side * 0.02;
                 break;
             }
             case 'wave':
@@ -761,23 +1049,44 @@ export class Bunny {
                 p.armL = { x: -0.2, z: -0.25 };
                 p.headZ = 0.18;
                 p.roll = Math.sin(t * 3) * 0.05;
-                p.headY = this.lookYaw * 0.3;
+                p.headY = clamp(this.viewerAngle(), -0.9, 0.9) * 0.6;
+                p.gaze = 'camera';
+                p.mouth = 0.65;
+                p.browY = 0.025;
                 break;
             case 'eat': {
                 const munch = Math.sin(t * 18);
-                p.armL = { x: -1.85, z: 0.42 };
-                p.armR = { x: -1.85, z: -0.42 };
+                p.armL = { x: -1.95, z: 0.4 };
+                p.armR = { x: -1.95, z: -0.4 };
                 p.snack = true;
                 p.headX = 0.12 + munch * 0.04;
-                p.sy += munch * 0.01;
+                p.sy += munch * 0.012;
                 p.earBack = -0.05;
                 p.eyes = Math.sin(t * 0.8) > 0.6 ? 0.45 : 1;
+                p.mouth = 0.18 + Math.abs(munch) * 0.32;
+                p.mouthW = 0.8;
+                p.browY = 0.015;
                 break;
             }
             default: // idle
                 p.headY = this.lookYaw;
                 break;
         }
+
+        // idle bunnies fidget now and then
+        if (loop === 'idle' && !this.weaponHeld && !this.once && !this.flight && this.dizzy <= 0) {
+            if (!this.fidget) {
+                this.fidgetIn -= dt;
+                if (this.fidgetIn <= 0) {
+                    const name = pick(FIDGETS);
+                    this.fidget = { name, t: 0, d: FIDGET_SECONDS[name] };
+                }
+            }
+            if (this.fidget) this.fidgetPose(p, dt);
+        } else if (this.fidget) {
+            this.fidget = null;
+        }
+
         if (this.weaponHeld && !aiming && loop === 'idle') {
             p.weapon = true; // carrying it, the barrel a little down
             p.weaponPitch = -0.25;
@@ -788,6 +1097,18 @@ export class Bunny {
             this.weaponArms(p, pitch);
         }
 
+        // dizzy after a hit: stars, wobbly head, pupils rolling around
+        if (this.dizzy > 0) {
+            this.dizzy -= dt;
+            p.gaze = 'dizzy';
+            p.roll += Math.sin(c * 5) * 0.07;
+            p.headZ += Math.sin(c * 5 + 1) * 0.15;
+            p.mouth = 0.32;
+            p.mouthRot = Math.sin(c * 3) * 0.25;
+            p.browTilt = -0.3;
+            p.browSkew = Math.sin(c * 4) * 0.02;
+        }
+
         // a one-shot on top
         if (this.once) {
             const o = this.once;
@@ -796,13 +1117,28 @@ export class Bunny {
             if (o.name === 'fire') this.firePose(p, k);
             if (o.name === 'hurt') {
                 const shake = Math.sin(o.t * 50) * (1 - k);
-                p.lean -= 0.35 * (1 - k);
-                p.roll += shake * 0.12;
-                p.eyes = Math.min(p.eyes, k < 0.6 ? 0.08 : 1);
+                p.lean -= 0.4 * (1 - k);
+                p.roll += shake * 0.14;
                 p.earBack = -0.9 * (1 - k);
-                p.sy *= 1 - 0.1 * (1 - k);
-                p.armL = { x: -0.9, z: -0.9 };
-                p.armR = { x: -0.9, z: 0.9 };
+                p.sy *= 1 - 0.14 * (1 - k);
+                p.sx *= 1 + 0.08 * (1 - k);
+                p.armL = { x: -0.9, z: -1.1 };
+                p.armR = { x: -0.9, z: 1.1 };
+                if (k < 0.45) {
+                    // squeezed shut, teeth gritted
+                    p.eyes = 0.08;
+                    p.mouth = 0.55;
+                    p.mouthW = 1.25;
+                    p.browTilt = 0.35;
+                } else {
+                    // then wide eyes and an "O"
+                    p.eyes = 1.25;
+                    p.pupil = 0.7;
+                    p.mouth = 1;
+                    p.mouthW = 0.6;
+                    p.browTilt = -0.45;
+                    p.browY = 0.04;
+                }
             }
             if (o.t >= o.duration) this.once = null;
         }
@@ -810,15 +1146,21 @@ export class Bunny {
         // the landing squash
         if (this.squash > 0) {
             this.squash = Math.max(0, this.squash - dt * 4);
-            p.sy *= 1 - 0.25 * this.squash;
-            p.sx *= 1 + 0.18 * this.squash;
+            p.sy *= 1 - 0.3 * this.squash;
+            p.sx *= 1 + 0.22 * this.squash;
         }
 
-        // tumbling through the air
+        // tumbling through the air: screaming, flailing
         if (this.flight) {
-            p.armL = { x: -0.5 + Math.sin(c * 20) * 0.5, z: -2.2 };
-            p.armR = { x: -0.5 - Math.sin(c * 20) * 0.5, z: 2.2 };
-            p.eyes = 0.1;
+            p.armL = { x: -0.5 + Math.sin(c * 22) * 0.7, z: -2.3 + Math.cos(c * 19) * 0.4 };
+            p.armR = { x: -0.5 - Math.sin(c * 22) * 0.7, z: 2.3 - Math.cos(c * 19) * 0.4 };
+            p.eyes = 1.3;
+            p.pupil = 0.6;
+            p.gaze = 'free';
+            p.mouth = 1.3;
+            p.mouthW = 1.1;
+            p.browTilt = -0.4;
+            p.browY = 0.045;
             p.earBack = -1.1;
         }
 
@@ -846,6 +1188,142 @@ export class Bunny {
         }
         if (this.wiggle > 0) this.wiggle -= dt;
         return p;
+    }
+
+    /** The idle fidgets: yawning, scratching, hiccups, a look at the player, polishing the helmet, sneezing, a raspberry, a big stretch. */
+    fidgetPose(p, dt) {
+        const f = this.fidget;
+        f.t += dt;
+        const k = Math.min(1, f.t / f.d);
+        const env = Math.sin(Math.PI * k);
+        switch (f.name) {
+            case 'yawn':
+                p.mouth = 0.26 + 1.15 * env;
+                p.mouthW = 0.85;
+                p.eyes = 1 - 0.9 * env;
+                p.headX = -0.35 * env;
+                p.armL = { x: -0.3, z: -0.4 - 2.2 * env };
+                p.armR = { x: -0.3, z: 0.4 + 2.2 * env };
+                p.sy *= 1 + 0.07 * env;
+                p.browY = 0.025 * env;
+                p.earBack = -0.12 - 0.35 * env;
+                if (!f.said && k > 0.3) {
+                    f.said = true;
+                    this.quip('yawn', 0.2);
+                }
+                break;
+            case 'scratch': {
+                // a good scratch behind the ear: blissful face, the leg would do it too if it could
+                const s = Math.sin(f.t * 34);
+                p.armR = { x: -0.5, z: 2.55 + s * 0.22 };
+                p.headZ = -0.32 * env;
+                p.roll = -0.1 * env;
+                p.eyes = 0.4;
+                p.mouth = 0.4;
+                p.mouthRot = 0.2;
+                p.browY = 0.03;
+                p.browTilt = -0.15;
+                if (s > 0.9) this.twitch = 0.1;
+                break;
+            }
+            case 'hiccup':
+                for (const h of [0.12, 0.5, 0.86]) {
+                    const d = (k - h) / 0.09;
+                    if (d > 0 && d < 1) {
+                        const bump = Math.sin(Math.PI * d);
+                        p.y += bump * 0.14;
+                        p.sy *= 1 + 0.1 * bump;
+                        p.armL = { x: -0.3, z: -0.6 * bump - 0.2 };
+                        p.armR = { x: -0.3, z: 0.6 * bump + 0.2 };
+                    }
+                }
+                p.eyes = 1.2;
+                p.pupil = 0.8;
+                p.browY = 0.04;
+                p.mouth = 0.35;
+                p.mouthW = 0.5;
+                if (!f.said && k > 0.12) {
+                    f.said = true;
+                    this.quip('hiccup', 0.45);
+                }
+                break;
+            case 'lookcam':
+                p.gaze = 'camera';
+                p.headY = clamp(this.viewerAngle(), -1.1, 1.1) * env;
+                p.headZ = 0.12 * env;
+                p.mouth = 0.6;
+                p.browY = 0.025;
+                p.browSkew = 0.015;
+                if (k > 0.25 && k < 0.85) p.armR = { x: -0.4, z: 2.4 + Math.sin(f.t * 10) * 0.35 };
+                if (!f.said && k > 0.3) {
+                    f.said = true;
+                    if (Math.abs(this.viewerAngle()) < 1.4) this.quip('greet', 0.3);
+                }
+                break;
+            case 'polish': {
+                const s = Math.sin(f.t * 22);
+                p.armL = { x: -0.9, z: -2.45 + s * 0.22 };
+                p.headZ = 0.18 * env;
+                p.eyes = 0.5;
+                p.mouth = 0.35;
+                p.helmetRub = s * 0.06 * env;
+                p.browY = 0.02;
+                break;
+            }
+            case 'sneeze':
+                if (k < 0.6) {
+                    const w = k / 0.6;
+                    p.headX = -0.4 * w;
+                    p.eyes = 1 - 0.85 * w;
+                    p.mouth = 0.26 + 0.45 * w;
+                    p.browY = 0.03 * w;
+                    p.browTilt = -0.3 * w;
+                    p.sy *= 1 + 0.05 * w;
+                } else {
+                    const w = Math.max(0, 1 - (k - 0.6) / 0.4);
+                    p.headX = 0.4 * w;
+                    p.lean = 0.22 * w;
+                    p.eyes = 0.1 + 0.9 * (1 - w);
+                    p.mouth = 0.9 * w;
+                    p.sy *= 1 - 0.08 * w;
+                    if (!f.sneezed) {
+                        f.sneezed = true;
+                        const at = this.position.clone();
+                        at.x += Math.sin(this.yaw) * 0.55;
+                        at.z += Math.cos(this.yaw) * 0.55;
+                        at.y += 0.75;
+                        this.particles()?.emit(at, { count: 10, speed: 1.3, up: 0.2, colors: [0xffffff, 0xeef4ff], life: 0.5, gravity: 0, spread: 0.12, size: 0.18, grow: 1.4, fade: true, drag: 4 });
+                        if (Math.random() < 0.5) this.helmetPop = { t: 0, height: 0.22 };
+                        this.quip('sneeze', 0.6);
+                    }
+                }
+                break;
+            case 'raspberry':
+                // tongue out at the player, cross-eyed
+                p.gaze = 'cross';
+                p.headY = clamp(this.viewerAngle(), -0.9, 0.9) * 0.7 * env;
+                p.mouth = 0.75 * env + 0.15;
+                p.mouthW = 0.75;
+                p.browSkew = 0.03 * env;
+                p.browY = 0.02;
+                p.headZ = Math.sin(f.t * 16) * 0.08 * env;
+                p.earSpread = 0.18 + 0.25 * env;
+                break;
+            case 'stretch':
+                p.armL = { x: -3.0 * env, z: -0.3 };
+                p.armR = { x: -3.0 * env, z: 0.3 };
+                p.sy *= 1 + 0.12 * env;
+                p.sx *= 1 - 0.05 * env;
+                p.lean = -0.18 * env;
+                p.eyes = 1 - 0.85 * env;
+                p.mouth = 0.26 + 0.4 * env;
+                p.earBack = -0.12 - 0.3 * env;
+                break;
+        }
+        if (f.t >= f.d) {
+            this.fidget = null;
+            this.fidgetIn = 3.5 + Math.random() * 6;
+        }
     }
 
     /** Arms holding the weapon of the bunny, the weapon tilted by the pitch. */
@@ -883,6 +1361,9 @@ export class Bunny {
                 p.lean = k < 0.3 ? -0.2 : 0.25 * swing;
                 p.weapon = k < 0.32;
                 p.weaponPitch = 0.9;
+                p.mouth = k < 0.3 ? 0.3 : 0.95;
+                p.browTilt = 0.45;
+                p.eyes = k < 0.3 ? 0.7 : 1.1;
                 break;
             }
             case 'Airstrike':
@@ -891,17 +1372,24 @@ export class Bunny {
                 p.headZ = 0.25 + Math.sin(k * 30) * 0.05;
                 p.headX = -0.1;
                 p.armL = { x: -0.3, z: -1.6 + Math.sin(k * 25) * 0.4 }; // pointing and calling
+                p.mouth = 0.3 + Math.abs(Math.sin(k * 32)) * 0.6;
+                p.browY = 0.02;
                 break;
             default: {
                 // a kick back
                 const kick = Math.max(0, 1 - k * 2.5);
                 p.weapon = true;
                 p.kick = kick;
-                p.lean -= 0.22 * kick;
-                p.sy *= 1 - 0.06 * kick;
-                p.weaponPitch = this.aimPitch + 0.25 * kick;
+                p.lean -= 0.3 * kick;
+                p.sy *= 1 - 0.1 * kick;
+                p.sx *= 1 + 0.06 * kick;
+                p.weaponPitch = this.aimPitch + 0.3 * kick;
                 this.weaponArms(p, p.weaponPitch);
-                p.earBack = -0.6 * kick - 0.1;
+                p.earBack = -0.7 * kick - 0.1;
+                p.eyes = kick > 0.2 ? 0.25 : 1.15;
+                p.mouth = 0.4 + 0.7 * kick;
+                p.mouthW = 1.2;
+                p.browTilt = 0.5;
                 break;
             }
         }
@@ -909,7 +1397,7 @@ export class Bunny {
 
     apply(p, dt) {
         const m = this.model;
-        m.position.y = -0.45 + p.y;
+        m.position.y = -0.5 + p.y;
         m.scale.set(p.sx, p.sy, p.sx);
         m.rotation.x = smooth(m.rotation.x, p.lean, 14, dt);
         m.rotation.z = smooth(m.rotation.z, p.roll, 14, dt);
@@ -930,12 +1418,12 @@ export class Bunny {
         if (this.weapon) {
             this.weapon.visible = p.weapon;
             this.weaponPivot.rotation.x = smooth(this.weaponPivot.rotation.x, -p.weaponPitch, 16, dt);
-            this.weaponPivot.position.z = 0.2 - p.kick * 0.12;
+            this.weaponPivot.position.z = 0.22 - p.kick * 0.12;
         }
         this.snack.visible = p.snack;
         if (p.snack) this.snack.scale.setScalar(0.85 + 0.15 * Math.abs(Math.sin(this.animTime * 0.7)));
 
-        // ears: the bases follow the pose, the tips are springs pushed by the vertical acceleration
+        // the vertical acceleration shakes the ear tips and the pupils
         const v = (m.position.y - this.prevY) / Math.max(dt, 1e-3);
         const accel = (v - this.prevV) / Math.max(dt, 1e-3);
         this.prevY = m.position.y;
@@ -952,10 +1440,43 @@ export class Bunny {
             ear.tip.rotation.z = flop ? -1.05 : -ear.side * 0.05;
         }
 
-        this.eyes.scale.y = smooth(this.eyes.scale.y, p.eyes, 30, dt);
-        this.nose.scale.setScalar(this.wiggle > 0 ? 1 + Math.abs(Math.sin(this.wiggle * 26)) * 0.18 : 1);
+        this.applyFace(p, dt, accel);
 
-        // the red flash of a hit
+        // the helmet: askew, rubbed, or popping off after a hit
+        let hy = 0.23, hrx = -0.22, hrz = 0.09 + p.helmetRub;
+        if (this.helmetPop) {
+            const hp = this.helmetPop;
+            hp.t += dt;
+            const k = hp.t / 0.95;
+            if (k < 0.62) {
+                const u = k / 0.62;
+                hy += Math.sin(Math.PI * u) * hp.height;
+                hrx -= u * Math.PI * 2; // a full flip
+            } else {
+                const u = (k - 0.62) / 0.38;
+                hy += Math.abs(Math.sin(u * Math.PI * 2)) * 0.05 * (1 - u);
+                hrz += Math.sin(u * 20) * 0.35 * (1 - u);
+            }
+            if (k >= 1) this.helmetPop = null;
+        }
+        this.helmet.position.y = hy;
+        this.helmet.rotation.x = hrx;
+        this.helmet.rotation.z = hrz;
+
+        // dizzy stars
+        const dizzy = this.dizzy > 0 || this.once?.name === 'hurt';
+        this.stars.visible = dizzy;
+        if (dizzy) {
+            this.stars.rotation.y += dt * 5;
+            this.stars.position.y = 0.52 + Math.sin(this.clock * 6) * 0.03;
+            const s = Math.min(1, this.dizzy * 1.5 + 0.2);
+            this.stars.scale.setScalar(s);
+        }
+
+        // soot fades, the red flash of a hit
+        if (this.soot > 0) this.soot = Math.max(0, this.soot - dt * 0.12);
+        const soot = this.soot * 0.7;
+        this.furMaterial.color.setRGB(1 - soot, 1 - soot * 1.02, 1 - soot * 1.05);
         if (this.flash > 0) {
             this.flash = Math.max(0, this.flash - dt * 2.2);
             this.furMaterial.emissive.setRGB(0.9 * this.flash, 0.05 * this.flash, 0.05 * this.flash);
@@ -967,14 +1488,83 @@ export class Bunny {
         }
     }
 
+    /** Eyes (blink, wide, googly pupils that look somewhere), brows, mouth and nose. */
+    applyFace(p, dt, accel) {
+        const open = p.eyes;
+        this.eyes.scale.y = smooth(this.eyes.scale.y, Math.min(open, 1.3), 30, dt);
+        this.eyes.scale.x = smooth(this.eyes.scale.x, open > 1 ? 1 + (open - 1) * 0.5 : 1, 20, dt);
+
+        // where the pupils want to be (−1 .. 1 in the eyeball)
+        let tx = this.glanceX, ty = this.glanceY;
+        let tx2 = null, ty2 = null;
+        switch (p.gaze) {
+            case 'forward':
+                tx = 0;
+                ty = p.gazeY;
+                break;
+            case 'camera': {
+                const rel = this.viewerAngle(p.twist + this.headYaw);
+                if (Math.cos(rel) > 0.05) {
+                    tx = clamp(Math.sin(rel) * 1.5, -1, 1);
+                    const dx = viewer.x - this.position.x, dz = viewer.z - this.position.z;
+                    ty = clamp(Math.atan2(viewer.y - this.position.y - 0.9, Math.hypot(dx, dz)) * 1.4, -0.9, 0.9);
+                }
+                break;
+            }
+            case 'dizzy': {
+                const a = this.clock * 11;
+                tx = Math.cos(a) * 0.85;
+                ty = Math.sin(a) * 0.85;
+                tx2 = Math.cos(-a + 1) * 0.85;
+                ty2 = Math.sin(-a + 1) * 0.85;
+                break;
+            }
+            case 'cross':
+                tx = 0.85;
+                tx2 = -0.85;
+                ty = ty2 = -0.1;
+                break;
+            default:
+                if (this.flight) {
+                    tx = Math.sin(this.clock * 17) * 0.8;
+                    ty = Math.cos(this.clock * 13) * 0.8;
+                }
+                break;
+        }
+        const push = clamp(-accel * 1.8, -120, 120);
+        for (let i = 0; i < 2; i++) {
+            const spring = this.pupilSprings[i];
+            spring.step(dt, i === 0 ? tx : tx2 ?? tx, i === 0 ? ty : ty2 ?? ty, push);
+            const pupil = this.pupils[i];
+            pupil.position.x = (i === 0 ? -EYE_X : EYE_X) + spring.x * 0.034;
+            pupil.position.y = spring.y * 0.04;
+            const size = smooth(pupil.scale.x, p.pupil, 12, dt);
+            pupil.scale.set(size, size, 1);
+        }
+
+        for (const brow of this.brows) {
+            const s = brow.userData.side;
+            brow.position.y = smooth(brow.position.y, BROW_Y + p.browY + (open > 1 ? (open - 1) * 0.06 : 0) + s * p.browSkew, 14, dt);
+            brow.rotation.z = smooth(brow.rotation.z, s * p.browTilt, 14, dt);
+        }
+
+        this.mouth.scale.y = smooth(this.mouth.scale.y, Math.max(0.26, p.mouth), 18, dt);
+        this.mouth.scale.x = smooth(this.mouth.scale.x, p.mouthW, 14, dt);
+        this.mouth.rotation.z = smooth(this.mouth.rotation.z, p.mouthRot, 12, dt);
+        this.mouth.position.x = smooth(this.mouth.position.x, p.mouthX, 12, dt);
+        this.nose.scale.setScalar(this.wiggle > 0 ? 1 + Math.abs(Math.sin(this.wiggle * 26)) * 0.2 : 1);
+    }
+
     updateDead(dt) {
         if (this.dying) {
             const d = this.dying;
             d.t += dt;
             const fall = Math.min(1, d.t / 0.45);
             this.model.rotation.z = (Math.PI / 2) * easeOutBack(fall) * 0.95;
-            this.model.position.y = -0.45 - fall * 0.12;
+            this.model.position.y = -0.5 - fall * 0.12;
             this.eyes.scale.y = 0.08;
+            this.mouth.scale.set(0.9, 0.6, 1); // the tongue hangs out
+            this.mouth.rotation.z = 0.3;
             this.furMaterial.emissive.setRGB(0, 0, 0);
             if (d.t > 0.6 && !this.ghost) {
                 this.ghost = ghostModel();
@@ -995,6 +1585,8 @@ export class Bunny {
                 this.ghost.position.y = 0.6 + k * 1.9;
                 this.ghost.position.x = Math.sin(k * 9) * 0.15;
                 this.ghost.rotation.y += dt * 1.5;
+                const wings = this.ghost.userData.wings;
+                if (wings) for (const w of wings) w.rotation.y = w.userData.side * (0.3 + Math.sin(d.t * 18) * 0.5);
                 for (const mat of this.ghost.userData.materials) mat.opacity = Math.max(0, (1 - k) * (mat === this.ghost.userData.materials[2] ? 0.95 : 0.75));
                 if (k >= 1) {
                     this.root.remove(this.ghost);
@@ -1008,9 +1600,10 @@ export class Bunny {
         if (this.sinking) {
             const s = this.sinking;
             s.t += dt;
-            this.model.position.y = -0.45 - s.t * 1.2;
+            this.model.position.y = -0.5 - s.t * 1.2;
             this.model.rotation.y += dt * 3;
-            this.eyes.scale.y = 0.08;
+            this.eyes.scale.y = 1.25;
+            this.mouth.scale.set(0.6, 1, 1);
             if (s.t < 1.2 && Math.random() < dt * 14) {
                 this.particles()?.emit(this.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.05, (Math.random() - 0.5) * 0.4)), { count: 2, speed: 0.3, up: 1.2, colors: [0xffffff, 0xd6eefc], life: 0.6, gravity: -0.2, size: 0.12, fade: true });
             }
@@ -1022,21 +1615,154 @@ export class Bunny {
     }
 
     dispose() {
-        if (this.aimDots) {
-            this.aimDots.parent?.remove(this.aimDots);
-            this.aimDots.material.dispose();
-            this.aimDots.dispose();
-            this.aimDots = null;
-        }
         if (this.ghost) for (const mat of this.ghost.userData.materials) mat.dispose();
         this.root.parent?.remove(this.root);
         this.label.dispose();
+        this.bubble?.dispose();
         this.furMaterial.dispose();
     }
 }
 
-const MAX_DOTS = 48;
-const dotGeometry = new THREE.SphereGeometry(0.055, 8, 6);
+// ---------------------------------------------------------------- the speech bubble
+
+/** A cartoon speech bubble: a canvas texture on a sprite above the head (above the label when it shows), pops in and fades out. */
+class Bubble {
+    constructor(bunny) {
+        this.bunny = bunny;
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = 512;
+        this.canvas.height = 256;
+        this.texture = new THREE.CanvasTexture(this.canvas);
+        this.texture.colorSpace = THREE.SRGBColorSpace;
+        this.texture.anisotropy = 4;
+        this.sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.texture, depthTest: false, transparent: true }));
+        this.sprite.renderOrder = 11;
+        this.sprite.center.set(0.14, 0);
+        this.sprite.visible = false;
+        this.base = new THREE.Vector2(2.5, 2.5 * 256 / 512);
+        this.active = false;
+        this.time = 0;
+        this.duration = 0;
+        this.text = '';
+        this.sprite.onBeforeRender = (renderer, scene, camera) => {
+            const d = camera.position.distanceTo(this.sprite.getWorldPosition(tmpVector));
+            // keeps nearly the same size on the screen, so a quip is readable from the aim camera too
+            const k = Math.max(0.8, Math.min(4, d / 10));
+            const t = this.time;
+            const pop = t < 0.22 ? Math.max(0.01, easeOutBack(t / 0.22)) : 1;
+            this.sprite.scale.set(this.base.x * k * pop, this.base.y * k * pop, 1);
+            const b = this.bunny;
+            const labelShown = b.alive && !b.labelHidden;
+            this.sprite.position.set(0.1, labelShown ? 1.92 + 0.46 * k : 1.55 + 0.15 * k, 0);
+            this.sprite.updateMatrixWorld();
+        };
+        labels.add(this);
+    }
+
+    show(text, seconds) {
+        this.text = text;
+        this.time = 0;
+        this.duration = Math.max(0.8, seconds);
+        this.active = true;
+        this.sprite.visible = true;
+        this.sprite.material.opacity = 1;
+        this.draw();
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        this.time += dt;
+        const left = this.duration - this.time;
+        this.sprite.material.opacity = Math.max(0, Math.min(1, left / 0.3));
+        if (left <= 0) {
+            this.active = false;
+            this.sprite.visible = false;
+        }
+    }
+
+    /** Wraps the text into at most three lines that fit the bubble. */
+    lines(c, text, width) {
+        const words = text.split(/\s+/);
+        const lines = [];
+        let line = '';
+        for (const w of words) {
+            const next = line ? `${line} ${w}` : w;
+            if (c.measureText(next).width > width && line) {
+                lines.push(line);
+                line = w;
+            } else {
+                line = next;
+            }
+        }
+        if (line) lines.push(line);
+        return lines.slice(0, 3);
+    }
+
+    draw() {
+        if (!this.text) return;
+        const c = this.canvas.getContext('2d');
+        const W = 512, H = 256;
+        c.clearRect(0, 0, W, H);
+        c.lineJoin = 'round';
+        let size = 44;
+        c.font = `${size}px ${FONT}`;
+        let lines = this.lines(c, this.text, 400);
+        if (lines.length > 2) {
+            size = 36;
+            c.font = `${size}px ${FONT}`;
+            lines = this.lines(c, this.text, 420);
+        }
+        const lh = size * 1.08;
+        const tw = Math.max(...lines.map(l => c.measureText(l).width));
+        const bw = Math.min(W - 16, tw + 60), bh = lines.length * lh + 34;
+        const tail = 34;
+        const bx = 8, by = H - tail - bh - 6;
+        // the shadow, the bubble with its tail (down to the anchor at x = 14 % of the canvas)
+        const ax = W * 0.14;
+        const path = () => {
+            const r = Math.min(34, bh / 2);
+            c.beginPath();
+            c.moveTo(bx + r, by);
+            c.arcTo(bx + bw, by, bx + bw, by + bh, r);
+            c.arcTo(bx + bw, by + bh, bx, by + bh, r);
+            c.lineTo(ax + 30, by + bh);
+            c.lineTo(ax - 8, H - 6);
+            c.lineTo(ax + 4, by + bh);
+            c.arcTo(bx, by + bh, bx, by, r);
+            c.arcTo(bx, by, bx + bw, by, r);
+            c.closePath();
+        };
+        c.save();
+        c.translate(0, 5);
+        path();
+        c.fillStyle = 'rgba(40,24,10,0.35)';
+        c.fill();
+        c.restore();
+        path();
+        c.fillStyle = '#fff7e2';
+        c.fill();
+        c.lineWidth = 7;
+        c.strokeStyle = '#4a2c14';
+        c.stroke();
+        // a gloss on top
+        c.beginPath();
+        c.ellipse(bx + bw * 0.32, by + 14, bw * 0.22, 6, 0, 0, Math.PI * 2);
+        c.fillStyle = 'rgba(255,255,255,0.8)';
+        c.fill();
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillStyle = '#4a2c14';
+        lines.forEach((l, i) => c.fillText(l, bx + bw / 2, by + 17 + lh * (i + 0.5) + 2));
+        this.texture.needsUpdate = true;
+    }
+
+    dispose() {
+        labels.delete(this);
+        this.sprite.parent?.remove(this.sprite);
+        this.texture.dispose();
+        this.sprite.material.dispose();
+    }
+}
 
 // ---------------------------------------------------------------- the marker of the turn
 
@@ -1100,7 +1826,9 @@ export class TurnMarker {
         this.time += dt;
         const p = this.bunny.position;
         const bounce = Math.abs(Math.sin(this.time * 3.4));
-        this.pointer.position.set(p.x, p.y + 2.5 + bounce * 0.32, p.z);
+        // a speech bubble of the bunny pushes the arrow up
+        this.lift = smooth(this.lift ?? 0, this.bunny.bubble?.active ? 1.0 : 0, 6, dt);
+        this.pointer.position.set(p.x, p.y + 2.55 + this.lift + bounce * 0.32, p.z);
         this.pointer.rotation.y += dt * 1.8;
         const squash = bounce < 0.15 ? 1 - (0.15 - bounce) * 1.5 : 1;
         this.pointer.scale.set(1 / squash, squash, 1 / squash);

@@ -123,6 +123,20 @@ float bwFbm(vec2 p) {
     for (int i = 0; i < 4; i++) { s += a * bwNoise(p); p = p * 2.03 + vec2(17.1, 9.7); a *= 0.5; }
     return s / 0.9375;
 }
+// cells of a jittered grid: x = distance to the nearest point, y = to the second nearest, z = a random value of the nearest cell
+vec3 bwVoronoi(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    float d1 = 8.0, d2 = 8.0, id = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 g = vec2(float(x), float(y));
+            vec2 o = vec2(bwHash(i + g), bwHash(i + g + 19.7));
+            float d = length(g + o - f);
+            if (d < d1) { d2 = d1; d1 = d; id = bwHash(i + g + 7.3); } else if (d < d2) { d2 = d; }
+        }
+    }
+    return vec3(d1, d2, id);
+}
 `;
 
 /** Shared uniforms of everything that moves with time and wind (grass, flowers, leaves, water). */

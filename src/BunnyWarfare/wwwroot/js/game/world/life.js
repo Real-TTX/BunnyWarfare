@@ -61,12 +61,143 @@ export class Life {
         const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.8 });
         this.disposables.push(material);
 
-        if (theme === 'Meadow') this.butterflies(material);
+        if (theme === 'Meadow') {
+            this.butterflies(material);
+            this.bees(material);
+            this.dragonflies(material);
+            this.ducks();
+            this.motes(260, 0xfff2b0, 0.05, 0.75, 2.5);
+        }
         if (theme === 'Meadow' || theme === 'Desert') this.gulls(material);
         if (theme !== 'Moon') this.fish(material);
-        if (theme === 'Snow') this.snowfall();
+        if (theme === 'Snow') { this.snowfall(); this.ducks(true); }
         if (theme === 'Desert') { this.dust(); this.tumbleweeds(); }
-        if (theme === 'Moon') this.shootingStars();
+        if (theme === 'Moon') { this.shootingStars(); this.motes(200, 0x9f8cff, 0.07, 0.8, 3, true); }
+    }
+
+    // ---------------------------------------------------------------- bees, dragonflies
+
+    bees(material) {
+        const count = 8;
+        const wing = wingGeometry(0.035, 0.04, '#eef6ff');
+        const body = merge([
+            paint(new THREE.SphereGeometry(0.03, 8, 6).scale(0.8, 0.8, 1.3), (x, y, z) => (Math.sin(z * 120) > 0 ? '#2a2018' : '#ffc21a')),
+        ]);
+        this.beeFlock = new Flock(count, wing, body, material);
+        this.beeState = [];
+        for (let i = 0; i < count; i++) this.beeState.push({ home: this.landSpot(), phase: this.random() * 10, speed: 1.4 + this.random() * 0.8 });
+        this.group.add(this.beeFlock.wings, this.beeFlock.body);
+    }
+
+    /** A spot at the water's edge (the pond or the coast), or null. */
+    shoreSpot() {
+        for (let t = 0; t < 200; t++) {
+            const x = 2 + this.random() * (this.data.width - 4), z = 2 + this.random() * (this.data.width - 4);
+            const a = this.data.heightAt(x, z) - this.data.waterLevel;
+            if (a > -0.6 && a < 0.1) return new THREE.Vector3(x, this.data.waterLevel, z);
+        }
+        return null;
+    }
+
+    dragonflies(material) {
+        const wing = wingGeometry(0.13, 0.05, '#dff4ff', '#9ad0f0');
+        const body = paint(new THREE.CylinderGeometry(0.012, 0.008, 0.2, 5).rotateX(Math.PI / 2), (x, y, z) => (z > 0.07 ? '#1a6fb0' : '#2fa8e0'));
+        this.dflyState = [];
+        for (let i = 0; i < 4; i++) {
+            const home = this.shoreSpot();
+            if (home) this.dflyState.push({ home, at: home.clone().setY(home.y + 0.6), goal: home.clone(), wait: 0, yaw: 0 });
+        }
+        if (this.dflyState.length === 0) return;
+        this.dflies = new Flock(this.dflyState.length, wing, body, material);
+        this.group.add(this.dflies.wings, this.dflies.body);
+    }
+
+    // ---------------------------------------------------------------- ducks (penguins would stand on the floes; on the snow island these are dark eiders)
+
+    ducks(snowy = false) {
+        const d = this.data;
+        const homes = [];
+        for (let t = 0; t < 600 && homes.length < 4; t++) {
+            const x = 2 + this.random() * (d.width - 4), z = 2 + this.random() * (d.width - 4);
+            const r = 0.8 + this.random() * 0.8;
+            let ok = true;
+            for (let k = 0; k < 8 && ok; k++) {
+                const a = (k / 8) * Math.PI * 2;
+                const depth = d.waterLevel - d.heightAt(x + Math.cos(a) * r, z + Math.sin(a) * r);
+                ok = depth > 0.25 && depth < 3;
+            }
+            if (ok && !homes.some(h => Math.hypot(h.x - x, h.z - z) < 3)) homes.push({ x, z, r, phase: this.random() * 10, speed: (0.25 + this.random() * 0.2) * (this.random() < 0.5 ? 1 : -1) });
+        }
+        if (homes.length === 0) return;
+        const parts = [];
+        const body = new THREE.SphereGeometry(0.14, 10, 8);
+        body.scale(0.85, 0.65, 1.25);
+        body.translate(0, 0.06, 0);
+        parts.push(paint(body, (x, y, z, nx, ny) => (snowy ? (ny > 0.2 ? '#f4f4f0' : '#2a2a30') : ny > 0.45 ? '#8a6a48' : z < -0.08 ? '#3a3028' : '#d8cbb4')));
+        const tail = new THREE.ConeGeometry(0.05, 0.12, 5);
+        tail.rotateX(-Math.PI / 2 - 0.5);
+        tail.translate(0, 0.12, -0.17);
+        parts.push(paint(tail, snowy ? '#2a2a30' : '#3a3028'));
+        const head = new THREE.SphereGeometry(0.075, 10, 8);
+        head.translate(0, 0.22, 0.12);
+        parts.push(paint(head, snowy ? '#f4f4f0' : '#2f7a3a'));
+        const neck = new THREE.TorusGeometry(0.055, 0.012, 4, 10);
+        neck.rotateX(Math.PI / 2);
+        neck.translate(0, 0.16, 0.11);
+        parts.push(paint(neck, '#ffffff'));
+        const beak = new THREE.BoxGeometry(0.05, 0.022, 0.08);
+        beak.translate(0, 0.21, 0.22);
+        parts.push(paint(beak, '#f2a01c'));
+        for (const s of [-1, 1]) {
+            const eye = new THREE.SphereGeometry(0.014, 5, 4);
+            eye.translate(s * 0.05, 0.24, 0.16);
+            parts.push(paint(eye, '#111111'));
+        }
+        const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
+        this.disposables.push(material);
+        this.duckMesh = new THREE.InstancedMesh(merge(parts), material, homes.length);
+        this.duckMesh.castShadow = true;
+        this.duckMesh.frustumCulled = false;
+        this.duckState = homes;
+        this.group.add(this.duckMesh);
+    }
+
+    // ---------------------------------------------------------------- motes: pollen in the sun, glowing dust on the moon
+
+    motes(count, color, size, opacity, height, additive = false) {
+        const d = this.data;
+        const positions = new Float32Array(count * 3);
+        this.moteBase = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            let x = 0, z = 0, y = d.waterLevel;
+            for (let t = 0; t < 20; t++) {
+                x = this.random() * d.width;
+                z = this.random() * d.width;
+                y = d.heightAt(x, z);
+                if (y > d.waterLevel + 0.3) break;
+            }
+            this.moteBase[i * 3] = x;
+            this.moteBase[i * 3 + 1] = Math.max(y, d.waterLevel) + 0.3 + this.random() * height;
+            this.moteBase[i * 3 + 2] = z;
+        }
+        positions.set(this.moteBase);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        g.addColorStop(0, 'rgba(255,255,255,1)');
+        g.addColorStop(0.4, 'rgba(255,255,255,0.6)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 32, 32);
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.PointsMaterial({ color, size, map: texture, transparent: true, opacity, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending });
+        this.moteCloud = new THREE.Points(geometry, material);
+        this.moteCloud.frustumCulled = false;
+        this.disposables.push(material, texture);
+        this.group.add(this.moteCloud);
     }
 
     // ---------------------------------------------------------------- butterflies
@@ -100,9 +231,11 @@ export class Life {
     // ---------------------------------------------------------------- seagulls
 
     gulls(material) {
-        const count = 6;
-        const wing = wingGeometry(0.55, 0.32, '#f4f6f8', '#3a3f48');
-        const body = paint(new THREE.CapsuleGeometry(0.08, 0.35, 2, 6).rotateX(Math.PI / 2), '#ffffff');
+        // seagulls; over the desert vultures circle instead
+        const vulture = this.theme === 'Desert';
+        const count = vulture ? 4 : 6;
+        const wing = vulture ? wingGeometry(0.75, 0.4, '#5a4636', '#1e1812') : wingGeometry(0.55, 0.32, '#f4f6f8', '#3a3f48');
+        const body = paint(new THREE.CapsuleGeometry(0.08, 0.35, 2, 6).rotateX(Math.PI / 2), vulture ? '#3a2e24' : '#ffffff');
         this.gullFlock = new Flock(count, wing, body, material);
         this.gullState = [];
         for (let i = 0; i < count; i++) {
@@ -237,6 +370,40 @@ export class Life {
             });
             this.gullFlock.commit();
         }
+        if (this.beeFlock) {
+            this.beeState.forEach((b, i) => {
+                const t = time * b.speed + b.phase;
+                // figure eights over the flowers, now and then a quick dart
+                v.set(b.home.x + Math.sin(t) * 0.9, 0, b.home.z + Math.sin(t * 2) * 0.45);
+                v.y = Math.max(this.data.heightAt(v.x, v.z), this.data.waterLevel) + 0.35 + Math.sin(t * 5.3) * 0.08;
+                const yaw = Math.atan2(Math.cos(t) * 0.9, Math.cos(t * 2) * 0.9);
+                this.beeFlock.set(i, v, yaw, Math.sin(time * 70 + i) * 0.7);
+            });
+            this.beeFlock.commit();
+        }
+        if (this.dflies) this.updateDragonflies(dt, time);
+        if (this.duckMesh) {
+            this.duckState.forEach((d, i) => {
+                const a = d.phase + time * d.speed;
+                v.set(d.x + Math.cos(a) * d.r, this.data.waterLevel - 0.04 + Math.sin(time * 2.1 + i) * 0.015, d.z + Math.sin(a) * d.r);
+                const yaw = Math.atan2(-Math.sin(a), Math.cos(a)) * 1 + (d.speed > 0 ? 0 : Math.PI);
+                e.set(Math.sin(time * 1.7 + i) * 0.05, yaw, Math.sin(time * 2.3 + i) * 0.06, 'YXZ');
+                q.setFromEuler(e);
+                m4.compose(v, q, s.set(1, 1, 1));
+                this.duckMesh.setMatrixAt(i, m4);
+            });
+            this.duckMesh.instanceMatrix.needsUpdate = true;
+        }
+        if (this.moteCloud) {
+            const p = this.moteCloud.geometry.attributes.position.array, b = this.moteBase;
+            for (let i = 0; i < p.length; i += 3) {
+                const k = i * 0.37;
+                p[i] = b[i] + Math.sin(time * 0.31 + k) * 0.6 + wind.x * 0.25;
+                p[i + 1] = b[i + 1] + Math.sin(time * 0.53 + k * 1.3) * 0.3;
+                p[i + 2] = b[i + 2] + Math.cos(time * 0.27 + k) * 0.6 + wind.y * 0.25;
+            }
+            this.moteCloud.geometry.attributes.position.needsUpdate = true;
+        }
         if (this.fishMesh) this.updateFish(dt);
         if (this.snow) {
             const p = this.snow.geometry.attributes.position.array;
@@ -276,6 +443,24 @@ export class Life {
                 this.rings.splice(i, 1);
             }
         }
+    }
+
+    /** Dragonflies hover, then dart to a new spot along the shore. */
+    updateDragonflies(dt, time) {
+        this.dflyState.forEach((f, i) => {
+            f.wait -= dt;
+            if (f.wait <= 0) {
+                f.wait = 0.8 + this.random() * 1.6;
+                f.goal.set(f.home.x + (this.random() - 0.5) * 3, this.data.waterLevel + 0.35 + this.random() * 0.6, f.home.z + (this.random() - 0.5) * 3);
+            }
+            const dx = f.goal.x - f.at.x, dz = f.goal.z - f.at.z;
+            if (Math.hypot(dx, dz) > 0.05) f.yaw = Math.atan2(dx, dz);
+            f.at.lerp(f.goal, 1 - Math.exp(-dt * 4));
+            v.copy(f.at);
+            v.y = Math.max(v.y, this.data.heightAt(v.x, v.z) + 0.3) + Math.sin(time * 9 + i) * 0.02;
+            this.dflies.set(i, v, f.yaw, Math.sin(time * 60 + i) * 0.35);
+        });
+        this.dflies.commit();
     }
 
     updateFish(dt) {

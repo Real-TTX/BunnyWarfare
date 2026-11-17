@@ -84,48 +84,127 @@ export function clover() {
 
 // ---------------------------------------------------------------- shrubs and trees
 
-export function bush(seed, greens = ['#3f8a2c', '#4f9a33', '#5fae3c'], berries = '#d6303a') {
+/**
+ * A soft round blob of leaves (or snow, or a cloud): a jittered icosphere with radial normals, so it shades round like a cartoon, not faceted.
+ * Its centre is at (cx, cy, cz); squash scales y.
+ */
+export function blob(r, cx, cy, cz, random, { detail = 2, lumps = 0.14, squash = 1 } = {}) {
+    const g = new THREE.IcosahedronGeometry(r, detail);
+    const pos = g.attributes.position;
+    const moved = new Map();
+    const normals = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        const key = `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+        let k = moved.get(key);
+        if (k === undefined) {
+            k = 1 + (random() - 0.5) * lumps * 2;
+            moved.set(key, k);
+        }
+        const len = Math.hypot(x, y, z) || 1;
+        normals[i * 3] = x / len;
+        normals[i * 3 + 1] = y / len;
+        normals[i * 3 + 2] = z / len;
+        pos.setXYZ(i, x * k + cx, y * k * squash + cy, z * k + cz);
+    }
+    g.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    return g;
+}
+
+/** Colours a canopy blob: light on top, dark below and inside, with brighter leaf clusters. */
+function leafy(g, tone, light, dark, canopyCentre, canopyRadius) {
+    return paint(g, (x, y, z, nx, ny) => {
+        const top = Math.max(0, ny), bottom = Math.max(0, -ny);
+        const inner = 1 - Math.min(1, Math.hypot(x - canopyCentre.x, y - canopyCentre.y, z - canopyCentre.z) / canopyRadius);
+        const cluster = Math.sin(x * 9.1 + y * 3.7) * Math.sin(z * 8.3 - y * 4.1) > 0.35 ? 0.18 : 0;
+        let col = lerpHex(tone, light, Math.min(1, top * 0.7 + cluster));
+        col = lerpHex(col, dark, Math.min(0.7, bottom * 0.6 + Math.max(0, inner - 0.35) * 0.7));
+        return col;
+    });
+}
+
+export function bush(seed, greens = ['#3f8a2c', '#4f9a33', '#5fae3c'], berries = '#d6303a', light = '#9ed36a') {
     const random = seeded(seed);
     const parts = [];
-    for (let i = 0; i < 5; i++) {
-        const r = 0.28 + random() * 0.2;
-        const g = jitter(new THREE.IcosahedronGeometry(r, 1), 0.08, random);
-        g.translate((random() - 0.5) * 0.55, r * 0.8 + random() * 0.15, (random() - 0.5) * 0.55);
-        parts.push(paint(g, (x, y, z, nx, ny) => lerpHex(greens[i % greens.length], '#2c5e20', ny < 0 ? 0.45 : 0)));
+    const centre = new THREE.Vector3(0, 0.4, 0);
+    for (let i = 0; i < 6; i++) {
+        const r = 0.24 + random() * 0.2;
+        const a = random() * Math.PI * 2, d = i === 0 ? 0 : 0.2 + random() * 0.15;
+        const g = blob(r, Math.cos(a) * d, r * 0.85 + random() * 0.18, Math.sin(a) * d, random, { detail: 1, lumps: 0.1 });
+        parts.push(leafy(g, greens[i % greens.length], light, '#1f4a18', centre, 0.75));
     }
     if (berries) {
-        for (let i = 0; i < 7; i++) {
-            const b = new THREE.SphereGeometry(0.045, 5, 3);
+        for (let i = 0; i < 9; i++) {
+            const b = new THREE.SphereGeometry(0.045, 6, 4);
             const a = random() * Math.PI * 2;
-            b.translate(Math.cos(a) * 0.42, 0.25 + random() * 0.35, Math.sin(a) * 0.42);
-            parts.push(paint(b, berries));
+            b.translate(Math.cos(a) * 0.4, 0.22 + random() * 0.4, Math.sin(a) * 0.4);
+            parts.push(paint(b, (x, y, z, nx, ny) => (ny > 0.5 ? '#ff8a8a' : berries)));
         }
     }
     return merge(parts);
 }
 
-export function oak(seed, greens = ['#4f9a33', '#5fae3c', '#3f8a2c', '#6dbb45']) {
-    const random = seeded(seed);
+/** A bark-coloured trunk with root flares at the foot. */
+function trunkWithRoots(random, height, bottom, top, color = '#7a4f2a', dark = '#5a381c') {
     const parts = [];
-    const trunk = new THREE.CylinderGeometry(0.13, 0.22, 1.7, 7);
-    trunk.translate(0, 0.85, 0);
-    parts.push(paint(trunk, (x, y) => (y > 1.2 ? '#6e4627' : '#7a4f2a')));
-    // two branches
-    for (let i = 0; i < 2; i++) {
-        const b = new THREE.CylinderGeometry(0.05, 0.08, 0.8, 5);
-        b.translate(0, 0.4, 0);
-        b.rotateZ((i ? 1 : -1) * 0.8);
-        b.rotateY(random() * 3);
-        b.translate(0, 1.2, 0);
+    const trunk = new THREE.CylinderGeometry(top, bottom, height, 9, 4);
+    const p = trunk.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i), a = Math.atan2(p.getZ(i), p.getX(i));
+        const k = 1 + Math.sin(a * 3 + y * 2.0) * 0.06;
+        p.setX(i, p.getX(i) * k);
+        p.setZ(i, p.getZ(i) * k);
+    }
+    trunk.computeVertexNormals();
+    trunk.translate(0, height / 2, 0);
+    parts.push(paint(trunk, (x, y, z) => {
+        const a = Math.atan2(z, x);
+        return Math.sin(a * 7 + Math.sin(y * 3) * 1.5) > 0.55 ? dark : color;
+    }));
+    for (let i = 0; i < 4; i++) {
+        const root = new THREE.ConeGeometry(0.09, 0.5, 5);
+        root.rotateZ(Math.PI / 2 - 0.45);
+        root.translate(bottom + 0.08, 0.08, 0);
+        root.rotateY((i / 4) * Math.PI * 2 + random() * 0.6);
+        parts.push(paint(root, dark));
+    }
+    return parts;
+}
+
+export function oak(seed, greens = ['#4f9a33', '#5fae3c', '#3f8a2c', '#6dbb45'], fruit = null) {
+    const random = seeded(seed);
+    const parts = trunkWithRoots(random, 1.8, 0.22, 0.13);
+    // three branches into the crown
+    for (let i = 0; i < 3; i++) {
+        const b = new THREE.CylinderGeometry(0.045, 0.08, 0.85, 6);
+        b.translate(0, 0.42, 0);
+        b.rotateZ(0.75);
+        b.rotateY((i / 3) * Math.PI * 2 + random());
+        b.translate(0, 1.3, 0);
         parts.push(paint(b, '#6e4627'));
     }
-    const blobs = 5 + Math.floor(random() * 3);
+    // the crown: a big core and a ring of smaller blobs, like a cartoon cloud
+    const centre = new THREE.Vector3(0, 2.45, 0);
+    parts.push(leafy(blob(0.95, 0, 2.4, 0, random, { detail: 3, lumps: 0.05 }), greens[0], '#a6da6e', '#2a5a1e', centre, 1.6));
+    const blobs = 7 + Math.floor(random() * 3);
+    const spots = [];
     for (let i = 0; i < blobs; i++) {
-        const r = 0.55 + random() * 0.45;
-        const s = jitter(new THREE.IcosahedronGeometry(r, 1), 0.12, random);
-        s.translate((random() - 0.5) * 1.3, 1.95 + random() * 0.9, (random() - 0.5) * 1.3);
-        const tone = greens[i % greens.length];
-        parts.push(paint(s, (x, y, z, nx, ny) => lerpHex(tone, ny > 0.5 ? '#9ed36a' : '#2f6a22', ny > 0.5 ? 0.25 : ny < -0.2 ? 0.4 : 0)));
+        const a = (i / blobs) * Math.PI * 2 + random() * 0.5;
+        const up = i % 3 === 0 ? 0.55 + random() * 0.35 : (random() - 0.4) * 0.5;
+        const r = 0.45 + random() * 0.3;
+        const d = 0.75 + random() * 0.25;
+        const x = Math.cos(a) * d, y = 2.4 + up, z = Math.sin(a) * d;
+        spots.push([x, y, z, r]);
+        parts.push(leafy(blob(r, x, y, z, random, { lumps: 0.06 }), greens[(i + 1) % greens.length], '#b4e27a', '#2a5a1e', centre, 1.6));
+    }
+    if (fruit) {
+        for (let i = 0; i < 9; i++) {
+            const [x, y, z, r] = spots[i % spots.length];
+            const a = random() * Math.PI * 2;
+            const f = new THREE.SphereGeometry(0.075, 7, 5);
+            f.translate(x + Math.cos(a) * r * 0.85, y - r * 0.35 + random() * 0.3, z + Math.sin(a) * r * 0.85);
+            parts.push(paint(f, (vx, vy, vz, nx, ny) => (ny > 0.5 ? '#ff7a6a' : fruit)));
+        }
     }
     return merge(parts);
 }
@@ -133,18 +212,17 @@ export function oak(seed, greens = ['#4f9a33', '#5fae3c', '#3f8a2c', '#6dbb45'])
 export function birch(seed) {
     const random = seeded(seed);
     const parts = [];
-    const trunk = new THREE.CylinderGeometry(0.08, 0.12, 2.6, 7, 6);
+    const trunk = new THREE.CylinderGeometry(0.08, 0.12, 2.6, 8, 8);
     trunk.translate(0, 1.3, 0);
     parts.push(paint(trunk, (x, y, z) => {
         const a = Math.atan2(z, x);
         return (Math.sin(y * 9 + a * 2) > 0.55 && Math.sin(a * 3 + y * 2) > -0.2) || Math.sin(y * 23 + a) > 0.93 ? '#2b2a28' : '#f6f1e6';
     }));
-    for (let i = 0; i < 4; i++) {
-        const r = 0.45 + random() * 0.3;
-        const s = jitter(new THREE.IcosahedronGeometry(r, 1), 0.1, random);
-        s.scale(0.8, 1.25, 0.8);
-        s.translate((random() - 0.5) * 0.7, 2.2 + i * 0.35 + random() * 0.2, (random() - 0.5) * 0.7);
-        parts.push(paint(s, (x, y, z, nx, ny) => (ny > 0.4 ? '#b5d86a' : ny < -0.2 ? '#5f8f2e' : '#8cc152')));
+    const centre = new THREE.Vector3(0, 2.8, 0);
+    for (let i = 0; i < 6; i++) {
+        const r = 0.38 + random() * 0.25;
+        const g = blob(r, (random() - 0.5) * 0.7, 2.1 + i * 0.28 + random() * 0.2, (random() - 0.5) * 0.7, random, { squash: 1.3, lumps: 0.1 });
+        parts.push(leafy(g, i % 2 ? '#8cc152' : '#7db546', '#c6e57a', '#3f6f22', centre, 1.2));
     }
     return merge(parts);
 }
@@ -621,5 +699,500 @@ export function flag() {
     back.rotateY(Math.PI);
     back.translate(0.9, 0, 0);
     parts.push(paint(back, '#a8380a'));
+    return merge(parts);
+}
+
+// ---------------------------------------------------------------- small things on the ground (all themes)
+
+/** A few flat stones lying together in a patch of about half a metre. */
+export function pebbles(seed, colors = ['#9a9286', '#7d766c', '#b3ab9e']) {
+    const random = seeded(seed);
+    const parts = [];
+    for (let i = 0; i < 6; i++) {
+        const r = 0.04 + random() * 0.07;
+        const g = jitter(new THREE.DodecahedronGeometry(r, 0), r * 0.45, random);
+        g.scale(1, 0.5 + random() * 0.25, 0.8 + random() * 0.4);
+        g.rotateY(random() * Math.PI);
+        g.translate((random() - 0.5) * 0.5, r * 0.25, (random() - 0.5) * 0.5);
+        const tone = colors[i % colors.length];
+        parts.push(paint(g, (x, y, z, nx, ny) => (ny > 0.5 ? lerpHex(tone, '#ffffff', 0.18) : tone)));
+    }
+    return merge(parts);
+}
+
+/** A rock outcrop for steep slopes: two or three chunky blocks with strata, half sunk into the ground. */
+export function cliffRock(seed, colors, { moss = null, snow = false } = {}) {
+    const random = seeded(seed);
+    const parts = [];
+    const count = 2 + Math.floor(random() * 2);
+    for (let i = 0; i < count; i++) {
+        const r = 0.45 + random() * 0.35;
+        const g = jitter(new THREE.DodecahedronGeometry(r, 0), r * 0.35, random);
+        g.scale(1.2 + random() * 0.4, 0.7 + random() * 0.3, 0.9 + random() * 0.3);
+        g.rotateY(random() * Math.PI);
+        g.translate((i - (count - 1) / 2) * 0.55 + (random() - 0.5) * 0.2, r * 0.35 + i * 0.12, (random() - 0.5) * 0.4);
+        parts.push(paint(g, (x, y, z, nx, ny) => {
+            if (snow && ny > 0.5) return '#f4f8fc';
+            if (moss && ny > 0.8 && Math.sin(x * 7 + z * 5) > 0) return lerpHex(moss, colors[0], 0.35);
+            const band = Math.sin(y * 11 + x * 1.5) * 0.5 + 0.5;
+            return lerpHex(lerpHex(colors[0], colors[1], band * 0.55), '#ffffff', ny > 0.75 ? 0.12 : 0);
+        }));
+    }
+    return merge(parts);
+}
+
+/** Twigs sticking out of the ground (dry bush, dead twigs in the snow). */
+export function twigs(seed, colors = ['#5a4030', '#6e5038']) {
+    const random = seeded(seed);
+    const parts = [];
+    for (let i = 0; i < 6; i++) {
+        const len = 0.25 + random() * 0.35;
+        const twig = new THREE.CylinderGeometry(0.006, 0.016, len, 3);
+        twig.translate(0, len / 2, 0);
+        twig.rotateZ((random() - 0.5) * 1.1);
+        twig.rotateY(random() * Math.PI * 2);
+        parts.push(paint(twig, colors[i % colors.length]));
+        const side = new THREE.CylinderGeometry(0.004, 0.008, len * 0.4, 3);
+        side.translate(0, len * 0.2, 0);
+        side.rotateZ(0.9);
+        side.translate(0, len * 0.6, 0);
+        side.rotateY(random() * Math.PI * 2);
+        parts.push(paint(side, colors[(i + 1) % colors.length]));
+    }
+    return merge(parts);
+}
+
+/** One footprint (two oval pads and toes) flat on the ground; trails are many of them. */
+export function footprint(color) {
+    const parts = [];
+    const sole = new THREE.CircleGeometry(0.07, 10);
+    sole.scale(0.75, 1.3, 1);
+    sole.rotateX(-Math.PI / 2);
+    parts.push(paint(sole, color));
+    for (let i = 0; i < 3; i++) {
+        const toe = new THREE.CircleGeometry(0.025, 6);
+        toe.rotateX(-Math.PI / 2);
+        toe.translate((i - 1) * 0.04, 0, 0.12 - Math.abs(i - 1) * 0.015);
+        parts.push(paint(toe, color));
+    }
+    return merge(parts);
+}
+
+// ---------------------------------------------------------------- meadow: stumps, logs, dandelions, ferns, a signpost, a burrow, leaves, a stone wall
+
+export function stump(seed) {
+    const random = seeded(seed);
+    const parts = trunkWithRoots(random, 0.42, 0.26, 0.22, '#7a4f2a', '#5a381c');
+    const top = new THREE.CircleGeometry(0.235, 14);
+    top.rotateX(-Math.PI / 2);
+    top.translate(0, 0.425, 0);
+    parts.push(paint(top, (x, y, z) => (Math.sin(Math.hypot(x, z) * 70) > 0.4 ? '#c99a62' : '#e0b67a')));
+    const cap = new THREE.SphereGeometry(0.07, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+    cap.scale(1, 0.6, 1);
+    cap.translate(0.2, 0.25, 0.1);
+    parts.push(paint(cap, '#e8a23a'));
+    return merge(parts);
+}
+
+/** A fallen log with moss on its back and rings at its ends. */
+export function log(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    const len = 1.5 + random() * 0.5;
+    const body = new THREE.CylinderGeometry(0.17, 0.2, len, 10, 3);
+    body.rotateZ(Math.PI / 2);
+    body.translate(0, 0.17, 0);
+    parts.push(paint(body, (x, y, z, nx, ny) => (ny > 0.65 && Math.sin(x * 6) > -0.5 ? '#5f9a3a' : Math.sin(Math.atan2(z, y - 0.17) * 9 + x * 2) > 0.5 ? '#5e3d22' : '#7a4f2a')));
+    for (const s of [-1, 1]) {
+        const end = new THREE.CircleGeometry(s < 0 ? 0.2 : 0.17, 12);
+        end.rotateY(s * Math.PI / 2);
+        end.translate(s * len / 2 + s * 0.002, 0.17, 0);
+        parts.push(paint(end, (x, y, z) => (Math.sin(Math.hypot(y - 0.17, z) * 60) > 0.3 ? '#c99a62' : '#e0b67a')));
+    }
+    const branch = new THREE.CylinderGeometry(0.025, 0.045, 0.45, 5);
+    branch.translate(0, 0.22, 0);
+    branch.rotateZ(-0.6);
+    branch.translate(0.3, 0.25, 0.05);
+    parts.push(paint(branch, '#6e4627'));
+    return merge(parts);
+}
+
+/** Dandelions: yellow flowers and white seed balls on thin stems. */
+export function dandelions(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    for (let i = 0; i < 5; i++) {
+        const h = 0.22 + random() * 0.2;
+        const x = (random() - 0.5) * 0.35, z = (random() - 0.5) * 0.35;
+        const stem = new THREE.CylinderGeometry(0.006, 0.009, h, 3);
+        stem.translate(x, h / 2, z);
+        parts.push(paint(stem, '#5a9a34'));
+        const puff = i % 2 === 0;
+        const head = new THREE.IcosahedronGeometry(puff ? 0.06 : 0.04, 1);
+        if (!puff) head.scale(1, 0.55, 1);
+        head.translate(x, h + 0.02, z);
+        parts.push(paint(head, (vx, vy, vz, nx, ny) => (puff ? (ny > -0.3 ? '#ffffff' : '#e6e6dc') : ny > 0 ? '#ffd23a' : '#e8a81c')));
+    }
+    for (let i = 0; i < 4; i++) {
+        const leaf = new THREE.ConeGeometry(0.035, 0.26, 3);
+        leaf.scale(1, 1, 0.25);
+        leaf.translate(0, 0.13, 0);
+        leaf.rotateZ(1.15);
+        leaf.rotateY((i / 4) * Math.PI * 2 + random());
+        parts.push(paint(leaf, '#4f8f2e'));
+    }
+    return merge(parts);
+}
+
+/** A fern: arched fronds from one point. */
+export function fern(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    for (let i = 0; i < 7; i++) {
+        const len = 0.45 + random() * 0.2;
+        const frond = new THREE.PlaneGeometry(0.11, len, 1, 6);
+        const p = frond.attributes.position;
+        for (let k = 0; k < p.count; k++) {
+            const t = (p.getY(k) + len / 2) / len;
+            p.setX(k, p.getX(k) * Math.sin(Math.PI * Math.min(1, t * 1.1)) * (1 - t * 0.4));
+            p.setZ(k, -t * t * len * 0.55);
+        }
+        frond.translate(0, len / 2, 0);
+        frond.rotateX(-0.25);
+        frond.rotateY((i / 7) * Math.PI * 2 + random() * 0.4);
+        parts.push(paint(frond, (x, y) => (y > len * 0.6 ? '#7fbf4a' : '#4f9a33')));
+    }
+    const g = merge(parts);
+    const n = g.attributes.normal;
+    for (let i = 0; i < n.count; i++) n.setXYZ(i, n.getX(i) * 0.3, 1, n.getZ(i) * 0.3);
+    return g;
+}
+
+/** A signpost with two boards, one of them shaped like a carrot. */
+export function signpost() {
+    const parts = [];
+    const wood = (x, y) => (Math.sin(y * 50 + x * 8) > 0.6 ? '#8a5a33' : '#a2703f');
+    const post = new THREE.BoxGeometry(0.09, 1.25, 0.09);
+    post.translate(0, 0.62, 0);
+    parts.push(paint(post, wood));
+    const board = new THREE.BoxGeometry(0.62, 0.17, 0.04);
+    board.translate(0.24, 1.05, 0.06);
+    parts.push(paint(board, wood));
+    const tip = new THREE.ConeGeometry(0.085, 0.16, 4);
+    tip.rotateZ(-Math.PI / 2);
+    tip.rotateX(Math.PI / 4);
+    tip.translate(0.62, 1.05, 0.06);
+    parts.push(paint(tip, wood));
+    const carrot = new THREE.ConeGeometry(0.09, 0.6, 7);
+    carrot.rotateZ(Math.PI / 2);
+    carrot.translate(-0.24, 0.78, 0.06);
+    parts.push(paint(carrot, (x) => (Math.sin(x * 60) > 0.7 ? '#d8661a' : '#f07a1c')));
+    for (let i = 0; i < 3; i++) {
+        const leaf = new THREE.ConeGeometry(0.03, 0.18, 4);
+        leaf.rotateZ(-Math.PI / 2 + (i - 1) * 0.5);
+        leaf.translate(0.15, 0.78 + (i - 1) * 0.04, 0.06);
+        parts.push(paint(leaf, '#4f9e2f'));
+    }
+    return merge(parts);
+}
+
+/** The entrance of a bunny burrow: a dark hole in a ring of dug earth. */
+export function burrow() {
+    const random = seeded(55);
+    const parts = [];
+    const hole = new THREE.CircleGeometry(0.3, 16);
+    hole.scale(1, 0.75, 1);
+    hole.rotateX(-Math.PI / 2);
+    hole.translate(0, 0.045, 0.03);
+    parts.push(paint(hole, (x, y, z) => (Math.hypot(x, z) < 0.18 ? '#120a05' : '#2a1a0e')));
+    const mound = new THREE.TorusGeometry(0.36, 0.13, 6, 16);
+    mound.rotateX(Math.PI / 2);
+    mound.scale(1, 1, 0.8);
+    mound.translate(0, 0.02, 0.02);
+    parts.push(paint(jitter(mound, 0.05, random), (x, y, z, nx, ny) => (ny > 0.5 ? '#8a6038' : '#6b4a2f')));
+    const back = new THREE.SphereGeometry(0.36, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    back.scale(0.9, 0.38, 0.55);
+    back.translate(0, 0, -0.5);
+    parts.push(paint(jitter(back, 0.04, random), (x, y, z, nx, ny) => (ny > 0.7 ? '#6fa83c' : '#7a5634')));
+    return merge(parts);
+}
+
+/** Fallen leaves around the foot of a tree. */
+export function fallenLeaves(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    const colors = ['#e0902a', '#c8641e', '#e8c03a', '#9a5a2a', '#7fae3c'];
+    for (let i = 0; i < 16; i++) {
+        const leaf = new THREE.CircleGeometry(0.05, 5);
+        leaf.scale(0.55, 1, 1);
+        leaf.rotateX(-Math.PI / 2 + (random() - 0.5) * 0.4);
+        leaf.rotateY(random() * Math.PI * 2);
+        const a = random() * Math.PI * 2, d = 0.35 + random() * 0.9;
+        leaf.translate(Math.cos(a) * d, 0.012 + random() * 0.01, Math.sin(a) * d);
+        parts.push(paint(leaf, colors[i % colors.length]));
+    }
+    return merge(parts);
+}
+
+/** A piece of dry stone wall, about two metres long. */
+export function stoneWall(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    for (let row = 0; row < 3; row++) {
+        let x = -1 + (row % 2) * 0.12;
+        while (x < 0.95) {
+            const w = 0.22 + random() * 0.14;
+            const h = 0.17 - row * 0.02;
+            const g = jitter(new THREE.BoxGeometry(w, h, 0.28 - row * 0.03, 1, 1, 1), 0.035, random);
+            g.translate(x + w / 2, 0.08 + row * 0.15, (random() - 0.5) * 0.03);
+            const tone = ['#9a9286', '#8a8276', '#aaa294', '#7d766c'][Math.floor(random() * 4)];
+            parts.push(paint(g, (vx, vy, vz, nx, ny) => (ny > 0.6 && random() < 0.5 ? '#6a9a3a' : tone)));
+            x += w + 0.02;
+        }
+    }
+    return merge(parts);
+}
+
+// ---------------------------------------------------------------- snow: drifts, an igloo, penguins
+
+export function snowDrift(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    for (let i = 0; i < 3; i++) {
+        const r = 0.35 + random() * 0.3;
+        parts.push(paint(blob(r, (i - 1) * 0.4, 0, (random() - 0.5) * 0.3, random, { detail: 1, squash: 0.3, lumps: 0.06 }), (x, y, z, nx, ny) => (ny > 0.2 ? '#ffffff' : '#d4e2ee')));
+    }
+    return merge(parts);
+}
+
+export function igloo() {
+    const parts = [];
+    const dome = new THREE.SphereGeometry(1.0, 18, 9, 0, Math.PI * 2, 0, Math.PI / 2);
+    parts.push(paint(dome, (x, y, z) => {
+        const ring = Math.abs(Math.sin(y * 9.5)) < 0.12;
+        const a = Math.atan2(z, x) * 6 + Math.floor(y * 3) * 0.7;
+        return ring || Math.abs(Math.sin(a)) < 0.08 ? '#c9dceb' : '#f6fbff';
+    }));
+    const tunnel = new THREE.CylinderGeometry(0.42, 0.42, 0.7, 12, 1, true, 0, Math.PI);
+    tunnel.rotateX(Math.PI / 2);
+    tunnel.rotateZ(Math.PI / 2);
+    tunnel.rotateY(Math.PI / 2);
+    tunnel.translate(0, 0, 1.0);
+    parts.push(paint(tunnel, (x, y, z, nx, ny) => (ny > 0 ? '#f2f8fd' : '#d0e0ec')));
+    const door = new THREE.CircleGeometry(0.34, 12, 0, Math.PI);
+    door.translate(0, 0, 1.36);
+    parts.push(paint(door, '#1d2a3a'));
+    return merge(parts);
+}
+
+export function penguin() {
+    const parts = [];
+    const body = new THREE.CapsuleGeometry(0.13, 0.2, 4, 10);
+    body.translate(0, 0.25, 0);
+    parts.push(paint(body, (x, y, z, nx, ny, nz) => (nz > 0.35 && y < 0.38 ? '#ffffff' : '#1f2430')));
+    const head = new THREE.SphereGeometry(0.1, 10, 8);
+    head.translate(0, 0.47, 0.01);
+    parts.push(paint(head, (x, y, z, nx, ny, nz) => (nz > 0.55 && ny < 0.3 ? '#ffffff' : '#1f2430')));
+    const beak = new THREE.ConeGeometry(0.03, 0.09, 5);
+    beak.rotateX(Math.PI / 2);
+    beak.translate(0, 0.46, 0.12);
+    parts.push(paint(beak, '#f29a1c'));
+    for (const s of [-1, 1]) {
+        const eye = new THREE.SphereGeometry(0.018, 6, 4);
+        eye.translate(s * 0.04, 0.5, 0.085);
+        parts.push(paint(eye, '#ffffff'));
+        const foot = new THREE.SphereGeometry(0.045, 6, 3);
+        foot.scale(0.8, 0.3, 1.4);
+        foot.translate(s * 0.06, 0.02, 0.05);
+        parts.push(paint(foot, '#f29a1c'));
+        const wing = new THREE.SphereGeometry(0.07, 6, 4);
+        wing.scale(0.3, 1.4, 0.8);
+        wing.rotateZ(s * 0.25);
+        wing.translate(s * 0.14, 0.27, 0);
+        parts.push(paint(wing, '#1f2430'));
+    }
+    return merge(parts);
+}
+
+// ---------------------------------------------------------------- desert: a cattle skull, pots, a dead tree
+
+export function cattleSkull() {
+    const parts = [];
+    const skull = new THREE.SphereGeometry(0.16, 10, 8);
+    skull.scale(0.9, 0.75, 1.3);
+    skull.translate(0, 0.1, 0);
+    parts.push(paint(skull, '#f3ead8'));
+    const snout = new THREE.SphereGeometry(0.09, 8, 6);
+    snout.scale(1, 0.75, 1.1);
+    snout.translate(0, 0.07, 0.2);
+    parts.push(paint(snout, '#ebe0ca'));
+    for (const s of [-1, 1]) {
+        const eye = new THREE.SphereGeometry(0.035, 6, 4);
+        eye.translate(s * 0.07, 0.15, 0.15);
+        parts.push(paint(eye, '#2a2018'));
+        const horn = new THREE.TorusGeometry(0.14, 0.03, 5, 8, Math.PI * 0.6);
+        horn.rotateZ(s > 0 ? -0.3 : Math.PI + 0.3);
+        horn.translate(s * 0.13, 0.12, -0.05);
+        parts.push(paint(horn, '#e0d2b4'));
+    }
+    return merge(parts);
+}
+
+/** Clay pots: two whole ones and a broken one with shards. */
+export function pots(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    const profile = [[0.0, 0], [0.1, 0.0], [0.17, 0.08], [0.19, 0.18], [0.15, 0.3], [0.07, 0.36], [0.08, 0.42]].map(([r, y]) => new THREE.Vector2(r, y));
+    for (let i = 0; i < 2; i++) {
+        const pot = new THREE.LatheGeometry(profile, 12);
+        const k = 0.8 + random() * 0.5;
+        pot.scale(k, k, k);
+        pot.translate(i * 0.38 - 0.2, 0, (random() - 0.5) * 0.15);
+        parts.push(paint(pot, (x, y) => (Math.abs(Math.sin(y * 30)) < 0.15 ? '#7a3a1c' : '#c26a3a')));
+    }
+    const broken = new THREE.LatheGeometry(profile.slice(0, 4), 10, 0, Math.PI * 1.2);
+    broken.rotateX(Math.PI / 2 - 0.2);
+    broken.translate(0.15, 0.12, 0.35);
+    parts.push(paint(broken, '#b45e32'));
+    for (let i = 0; i < 4; i++) {
+        const shard = new THREE.CircleGeometry(0.05 + random() * 0.03, 3);
+        shard.rotateX(-Math.PI / 2);
+        shard.translate((random() - 0.3) * 0.6, 0.01, 0.3 + random() * 0.3);
+        parts.push(paint(shard, '#b45e32'));
+    }
+    return merge(parts);
+}
+
+/** A bare, bleached tree with crooked branches. */
+export function deadTree(seed) {
+    const random = seeded(seed);
+    const parts = [];
+    const color = '#cdb89a', dark = '#9a8466';
+    const branch = (x, y, z, len, radius, tiltZ, rotY, depth) => {
+        const g = new THREE.CylinderGeometry(radius * 0.6, radius, len, 6);
+        g.translate(0, len / 2, 0);
+        g.rotateZ(tiltZ);
+        g.rotateY(rotY);
+        g.translate(x, y, z);
+        parts.push(paint(g, (vx, vy) => (Math.sin(vy * 20) > 0.6 ? dark : color)));
+        if (depth <= 0) return;
+        const tip = new THREE.Vector3(0, len, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), tiltZ).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+        for (let i = 0; i < 2; i++) {
+            branch(x + tip.x, y + tip.y, z + tip.z, len * (0.55 + random() * 0.2), radius * 0.6, tiltZ + (i ? 0.6 : -0.5) + (random() - 0.5) * 0.3, rotY + random() * 1.5, depth - 1);
+        }
+    };
+    branch(0, 0, 0, 1.2, 0.13, 0.1, 0, 3);
+    return merge(parts);
+}
+
+// ---------------------------------------------------------------- moon: crater rims, a rover
+
+/** The raised rim of a small crater (the hole itself is the ground). */
+export function craterRim(seed) {
+    const random = seeded(seed);
+    const g = jitter(new THREE.TorusGeometry(0.8, 0.16, 5, 18), 0.08, random);
+    g.rotateX(Math.PI / 2);
+    g.scale(1, 0.55, 1);
+    const parts = [paint(g, (x, y, z, nx, ny) => (ny > 0.4 ? '#c4c4ca' : '#7e7e86'))];
+    const floor = new THREE.CircleGeometry(0.78, 16);
+    floor.rotateX(-Math.PI / 2);
+    floor.translate(0, -0.02, 0);
+    parts.push(paint(floor, (x, y, z) => (Math.hypot(x, z) < 0.4 ? '#4e4e57' : '#62626b')));
+    return merge(parts);
+}
+
+/** A little moon rover of the bunnies: six wheels, a solar panel and a carrot antenna. */
+export function rover() {
+    const parts = [];
+    const body = new THREE.BoxGeometry(1.0, 0.3, 0.6);
+    body.translate(0, 0.45, 0);
+    parts.push(paint(body, (x, y, z, nx, ny) => (ny > 0.5 ? '#f0c75a' : '#d9a63a')));
+    const panel = new THREE.BoxGeometry(0.9, 0.04, 0.75);
+    panel.rotateZ(0.12);
+    panel.translate(-0.05, 0.72, 0);
+    parts.push(paint(panel, (x, y, z) => (Math.sin(x * 30) > 0.85 || Math.sin(z * 30) > 0.85 ? '#9aa6c8' : '#2b3a6e')));
+    const strut = new THREE.CylinderGeometry(0.03, 0.03, 0.2, 5);
+    strut.translate(0, 0.62, 0);
+    parts.push(paint(strut, '#9a9ca6'));
+    for (let i = 0; i < 3; i++) {
+        for (const s of [-1, 1]) {
+            const wheel = new THREE.CylinderGeometry(0.15, 0.15, 0.1, 12);
+            wheel.rotateX(Math.PI / 2);
+            wheel.translate((i - 1) * 0.38, 0.15, s * 0.36);
+            parts.push(paint(wheel, (x, y, z) => (Math.hypot(x - (i - 1) * 0.38, y - 0.15) < 0.07 ? '#b8bac4' : '#3a3a42')));
+        }
+    }
+    const mast = new THREE.CylinderGeometry(0.015, 0.015, 0.5, 4);
+    mast.translate(0.4, 0.85, 0.2);
+    parts.push(paint(mast, '#c8cad2'));
+    const carrot = new THREE.ConeGeometry(0.05, 0.22, 6);
+    carrot.rotateX(Math.PI);
+    carrot.translate(0.4, 1.15, 0.2);
+    parts.push(paint(carrot, '#f07a1c'));
+    const leaf = new THREE.ConeGeometry(0.03, 0.1, 4);
+    leaf.translate(0.4, 1.3, 0.2);
+    parts.push(paint(leaf, '#4f9e2f'));
+    const cam = new THREE.BoxGeometry(0.12, 0.1, 0.14);
+    cam.translate(0.45, 0.66, -0.15);
+    parts.push(paint(cam, '#e6e8ee'));
+    const lens = new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8);
+    lens.rotateZ(Math.PI / 2);
+    lens.translate(0.52, 0.66, -0.15);
+    parts.push(paint(lens, '#1d2a44'));
+    return merge(parts);
+}
+
+// ---------------------------------------------------------------- the windmill of the meadow (the sails are a mesh of their own: they turn)
+
+export const WINDMILL_HUB = new THREE.Vector3(0, 2.75, 0.74);
+
+export function windmillTower() {
+    const parts = [];
+    const tower = new THREE.CylinderGeometry(0.55, 0.85, 2.6, 8, 3);
+    tower.rotateY(Math.PI / 8); // a flat side to the front
+    tower.translate(0, 1.3, 0);
+    parts.push(paint(tower, (x, y, z, nx, ny) => (y < 0.25 ? '#9a9286' : Math.abs(Math.sin(y * 7)) < 0.05 ? '#e2d8c6' : '#f6efe2')));
+    const roof = new THREE.ConeGeometry(0.75, 0.9, 8);
+    roof.rotateY(Math.PI / 8);
+    roof.translate(0, 3.05, 0);
+    parts.push(paint(roof, (x, y, z) => (Math.sin(Math.atan2(z, x) * 8) > 0.6 ? '#9a3a22' : '#b8482a')));
+    const door = new THREE.BoxGeometry(0.4, 0.7, 0.06);
+    door.translate(0, 0.35, 0.82);
+    door.rotateX(-0.11);
+    parts.push(paint(door, (x) => (Math.abs(x) < 0.015 ? '#4a2c18' : '#7a4f2a')));
+    for (const y of [1.3, 2.05]) {
+        const win = new THREE.BoxGeometry(0.22, 0.26, 0.05);
+        win.translate(0, y, 0.82 - y * 0.115);
+        parts.push(paint(win, (x, wy) => (Math.abs(x) < 0.012 || Math.abs(wy - y) < 0.012 ? '#f6efe2' : '#2a3a54')));
+    }
+    const hub = new THREE.CylinderGeometry(0.1, 0.12, 0.3, 8);
+    hub.rotateX(Math.PI / 2);
+    hub.translate(0, 2.75, 0.55);
+    parts.push(paint(hub, '#5a3a22'));
+    return merge(parts);
+}
+
+export function windmillSails() {
+    const parts = [];
+    for (let i = 0; i < 4; i++) {
+        const arm = new THREE.BoxGeometry(0.07, 1.55, 0.05);
+        arm.translate(0, 0.85, 0);
+        const sail = new THREE.BoxGeometry(0.36, 1.15, 0.02);
+        sail.translate(0.2, 1.0, -0.02);
+        const pieces = [paint(arm, '#6e4627'), paint(sail, (x, y, z, nx, ny, nz) => (nz > 0.5 ? '#f4ecd8' : '#d8ccb4'))];
+        for (let k = 0; k < 5; k++) {
+            const bar = new THREE.BoxGeometry(0.4, 0.03, 0.035);
+            bar.translate(0.2, 0.47 + k * 0.265, 0.005);
+            pieces.push(paint(bar, '#7a4f2a'));
+        }
+        const edge = new THREE.BoxGeometry(0.03, 1.15, 0.035);
+        edge.translate(0.39, 1.0, 0.005);
+        pieces.push(paint(edge, '#7a4f2a'));
+        const blade = merge(pieces);
+        blade.rotateZ((i / 4) * Math.PI * 2);
+        parts.push(blade);
+    }
+    const cap = new THREE.SphereGeometry(0.11, 8, 6);
+    parts.push(paint(cap, '#5a3a22'));
     return merge(parts);
 }

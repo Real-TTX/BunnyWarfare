@@ -39,7 +39,7 @@ src/BunnyWarfare/Web           Identity (cookie ↔ Actor), AppInfo (version), U
 src/BunnyWarfare/Controls      tag helpers md-field, md-buttons, md-table, md-tabs/md-tab, md-tab-group/md-tab-button/md-tab-panel
 src/BunnyWarfare/Pages         App (the 3D player app, anonymous, no DB access), Admin (Index, Players, Matches, Worlds, Weapons, System; only admins, _Layout is the admin shell), About, Account/Logout, Error
 docs/PROTOCOL.md               the SignalR protocol and the JSON API — update it with every change of Dtos.cs / GameHub.cs / Api.cs
-src/BunnyWarfare/wwwroot/js/game  main (entry, router /↔/Play), api, ui, menu (all menu panels), showcase (living menu island), match (the match controller), hud, input, audio, icons, maps;
+src/BunnyWarfare/wwwroot/js/game  main (entry, router /↔/Play), api, ui, menu (all menu panels), showcase (living menu island), match (the match controller, aim camera), aim (predictShot = the server's flight on the browser's height map, AimGuide = dotted path + impact marker), hud, input, audio, icons, maps;
                                scene + terrain + world + world/ (sky, water, vegetation, models, life): the island; bunny + fx/: bunnies and weapons; effects + playback: shots
 scripts/                       redeploy.ps1/.sh, logo.js (logo in all levels of detail), icons.ps1 (PNG icons via Edge)
 ```
@@ -49,6 +49,7 @@ scripts/                       redeploy.ps1/.sh, logo.js (logo in all levels of 
 - The server is authoritative: `Simulation.Fire` changes terrain and bunnies and returns a `ShotResult` timeline that the browsers play. Browsers only send intentions.
 - `Terrain` heights are float32 and the crater formula is duplicated in `wwwroot/js/game` — keep both identical.
 - `Terrain.Generate` shapes the island per theme (warped coast, beaches/cliffs, pond, ridges, dunes, craters) and keeps the outer 9 cells under water; the client extends the sea floor beyond the map (`world/`), so no edge is visible. Tests hold the border depth and the land share.
+- The aim help (im.js) mirrors Simulation.Fly/Ray/airstrike drops (Dt, MaxSpeed, factors 0.8/0.9, bounce 0.45/0.35, bunny radius) — change both together. The own bunny ignores the echo of its own Moved (only corrections snap it).
 - Team colours in a lobby are kept apart (`MatchRoom.FreeColor`, distance > 120); a running match whose players all left is aborted after 30 s.
 - Everything of a room happens under `MatchRoom.LockAsync()`; methods return `Outgoing` messages that are sent in order while the lock is held.
 - Running matches live in memory; a restart aborts them (`MatchLogic.AbortStaleAsync`).

@@ -3,13 +3,16 @@
 import * as THREE from 'three';
 import { World } from './world.js';
 import { ShotPlayback } from './playback.js';
+import { AimGuide, predictShot } from './aim.js';
 import { ammoLeft } from './hud.js';
 import { $, toast, banner } from './ui.js';
 
-const MAX_SPEED = 24;          // Simulation.MaxSpeed
 const WALK_SPEED = 2.2;        // metres per second
 const PITCH_MIN = -30 * Math.PI / 180;
 const PITCH_MAX = 85 * Math.PI / 180;
+const FINE = 0.22;             // Shift: fine aim (share of the normal speed)
+const DEFAULT_POWER = 0.6;     // the power the guide shows before the first shot of a weapon
+const QUIPS = ['Für die Möhre!', 'Jetzt gibt\'s Salat!', 'Ohren steif!', 'Hopp, hopp!', 'Wer hat meine Karotte?', 'Achtung, Hase!', 'Möhren marsch!', 'Gleich knallt\'s!', 'Kopf runter!', 'Ich hab Hunger!'];
 const CHARGE_SECONDS = 1.5;
 const MOVE_INTERVAL = 100;     // ms between Move messages
 const AIM_INTERVAL = 200;      // ms between AimAt messages
@@ -55,7 +58,9 @@ export class Match {
             chargeStart: 0,
             awaitingShot: false,
             airTarget: null,
-            airMarker: null,
+            lastPower: {},
+            pitchHold: 0,
+            yawHold: 0,
             stamina: 0,
             lastSent: null,
             lastAim: { yaw: 0, pitch: 0, weaponId: 0, at: 0 },
@@ -135,6 +140,14 @@ export class Match {
         $('bw-help').hidden = true;
         $('bw-dropdown').hidden = true;
         $('bw-confirm').hidden = true;
+        this.guide?.dispose();
+        this.guide = null;
+        this.stage.rig.followRate = 5;
+        this.stage.rig.autoDistance = 0;
+        this.stage.rig.manualZoom = false;
+        this.stage.rig.manualPitch = false;
+        this.stage.rig.autoPitch = 0;
+        this.stage.setCenterShift(0);
         if (hub) await hub.stop().catch(() => {});
     }
 
@@ -210,8 +223,10 @@ export class Match {
         state.pendingTurns = [];
         state.world?.dispose();
         this.ctx.beforeWorld?.();
+        this.guide?.dispose();
         state.world = new World(this.stage, game);
-        state.airMarker = null;
+        this.guide = new AimGuide(state.world.group);
+        this.stage.setCenterShift(0.13);
         state.weapons = game.weapons;
         state.gravity = game.world.gravity;
         state.lastTurnNumber = -1;
@@ -253,7 +268,7 @@ export class Match {
             state.power = 0;
             state.awaitingShot = false;
             state.airTarget = null;
-            if (state.airMarker) state.airMarker.visible = false;
+            this.guide?.hide();
             for (const b of world.bunnies.values()) {
                 b.setAim(null);
                 if (b !== bunny && b.alive) b.play?.('idle');
@@ -262,9 +277,12 @@ export class Match {
                 state.lastSent = { x: bunny.position.x, y: bunny.position.y, z: bunny.position.z, at: 0 };
                 if (this.isMine()) {
                     this.stage.rig.yaw = bunny.yaw;
+                    this.stage.rig.manualZoom = false;
+                    this.stage.rig.manualPitch = false;
                     this.sound.ping();
                     toast('Du bist dran!', 'success');
                 }
+                if (turn.phase === 'Aiming') bunny.say?.(QUIPS[Math.floor(Math.random() * QUIPS.length)]);
             }
         }
         state.stamina = turn.stamina;
@@ -307,6 +325,8 @@ export class Match {
         const s = this.state;
         const b = s.world?.bunnies.get(m.bunnyId);
         if (!b) return;
+        // my own steps come back from the server: the bunny is already there (pulling it back made the walk rubbery and the bunny hop on the spot)
+        if (!m.correction && this.isMine() && b === this.currentBunny()) return;
         if (m.correction) {
             b.snap(m.x, m.y, m.z, m.yaw);
             s.stamina = m.stamina;
@@ -325,7 +345,11 @@ export class Match {
         b.setWeapon?.(weapon?.kind ?? null);
         b.setAimPitch?.(a.pitch);
         b.play?.('aim');
-        b.setAim(this.aimPoints(b, a.yaw, a.pitch, weapon, 0.55));
+        // the others see the direction (the first moment of the flight), not where it lands: they don't know the power
+        const start = this.predict(b, weapon, a.yaw, a.pitch, 0.55)?.paths[0]?.points.slice(0, 16);
+        b.setAim(start ?? null);
+        if (start && weapon.kind !== 'Airstrike') this.guide?.show({ paths: [{ points: start }], impacts: [] }, this.teamOf(b.team)?.color, { impacts: false });
+        else this.guide?.hide();
     }
 
     onShot(result) {
@@ -335,7 +359,7 @@ export class Match {
         s.charging = false;
         s.power = 0;
         s.awaitingShot = false;
-        if (s.airMarker) s.airMarker.visible = false;
+        this.guide?.hide();
         for (const b of world.bunnies.values()) b.setAim(null);
         if (s.turn) s.turn = { ...s.turn, phase: 'Resolving' };
         world.bunnies.get(result.shooterId)?.play?.('fire');
@@ -349,7 +373,7 @@ export class Match {
                 this.sound.boom(e.radius);
             },
             damage: (e, bunny) => {
-                bunny.play?.('hurt');
+                bunny.hurt(e.amount); // bigger hits, more slapstick
                 this.floaters.add(bunny.position, `−${e.amount}`);
             },
             death: (e, bunny) => this.floaters.add(bunny.position, e.cause === 'water' ? 'Plumps!' : 'K.O.', 'ko'),
@@ -400,19 +424,24 @@ export class Match {
 
     // ---------------------------------------------------------------- aiming and firing
 
-    /** The first ~0.6 s of a shot as points (a hint, not a prediction: no wind, no ground). */
-    aimPoints(bunny, yaw, pitch, weapon, power) {
-        if (!weapon || weapon.kind === 'Airstrike') return null;
-        const dir = new THREE.Vector3(Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch), Math.cos(pitch) * Math.cos(yaw));
-        const origin = bunny.position.clone().add(new THREE.Vector3(0, 0.85, 0)).addScaledVector(dir, 0.6);
-        if (weapon.kind === 'Hitscan') return [origin, origin.clone().addScaledVector(dir, 12)];
-        const factor = weapon.kind === 'Grenade' ? 0.8 : weapon.kind === 'Cluster' ? 0.9 : 1;
-        const v = dir.multiplyScalar(Math.max(0.15, power) * MAX_SPEED * factor);
-        const points = [];
-        for (let t = 0; t <= 0.6001; t += 0.04) {
-            points.push(new THREE.Vector3(origin.x + v.x * t, origin.y + v.y * t - 0.5 * this.state.gravity * t * t, origin.z + v.z * t));
-        }
-        return points;
+    /** Where a shot of <bunny> would go (aim.js flies it like the server: gravity, wind of the turn, bounces, bunnies in the way). */
+    predict(bunny, weapon, yaw, pitch, power) {
+        const s = this.state;
+        if (!s.world || !weapon) return null;
+        const turn = s.turn;
+        return predictShot({
+            data: s.world.data,
+            bunnies: s.world.bunnies.values(),
+            wind: new THREE.Vector2(turn?.windX ?? 0, turn?.windZ ?? 0),
+            gravity: s.gravity,
+            target: s.airTarget,
+        }, bunny, weapon, yaw, pitch, power);
+    }
+
+    /** The power the guide shows: while charging the charge, else the power of the last shot with this weapon. */
+    guidePower() {
+        const s = this.state;
+        return s.charging ? s.power : s.lastPower[s.weaponId] ?? DEFAULT_POWER;
     }
 
     startCharge() {
@@ -451,6 +480,7 @@ export class Match {
             tz = s.airTarget.z;
         }
         s.awaitingShot = true;
+        if (weapon.kind !== 'Airstrike' && weapon.kind !== 'Hitscan') s.lastPower[weapon.id] = Math.max(0.05, power);
         try {
             await this.call('Fire', weapon.id, r3(this.stage.rig.yaw), r3(s.pitch), r3(Math.max(0.05, power)), r3(tx), r3(tz));
         } catch {
@@ -465,7 +495,6 @@ export class Match {
         s.weaponId = id;
         s.charging = false;
         s.power = 0;
-        if (weapon.kind !== 'Airstrike' && s.airMarker) s.airMarker.visible = false;
         if (weapon.kind === 'Airstrike' && this.isMine()) toast('Luftschlag: Ziel auf der Insel anklicken, dann Feuer.', 'info');
         this.equip();
         this.refreshHud(true);
@@ -503,15 +532,6 @@ export class Match {
         const point = this.groundUnder(clientX, clientY);
         if (!point) return;
         s.airTarget = point;
-        if (!s.airMarker) {
-            const ring = new THREE.Mesh(new THREE.RingGeometry(1.4, 1.75, 40), new THREE.MeshBasicMaterial({ color: 0xff3b1f, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
-            ring.rotation.x = -Math.PI / 2;
-            ring.renderOrder = 6;
-            world.group.add(ring);
-            s.airMarker = ring;
-        }
-        s.airMarker.position.set(point.x, point.y + 0.08, point.z);
-        s.airMarker.visible = true;
         this.sound.tick();
     }
 
@@ -629,6 +649,19 @@ export class Match {
         this.placeAirTarget(x, y);
     }
 
+    /**
+     * A drag on the island: the left button turns the camera (= the direction of the aim); the right button aims precisely:
+     * sideways turns, up and down tilts the barrel (Shift: even finer). Returns false when the drag is not for aiming.
+     */
+    aimDrag(dx, dy, button, fine) {
+        if (button !== 2 || !this.canAim()) return false;
+        const s = this.state;
+        const k = fine ? FINE : 1;
+        this.stage.rig.yaw -= dx * 0.0028 * k;
+        s.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, s.pitch - dy * 0.0035 * k));
+        return true;
+    }
+
     skip() {
         this.call('SkipTurn').catch(() => {});
     }
@@ -648,6 +681,18 @@ export class Match {
         if (bunny) return bunny.position.clone().add(new THREE.Vector3(0, 0.9, 0));
         const w = this.state.world?.width ?? 20;
         return new THREE.Vector3(w / 2, 2, w / 2);
+    }
+
+    /** Where the aim camera looks and how far it stays back so that the bunny and the impact <end> are both in the picture. */
+    aimView(bunny, end) {
+        const from = this.focusPoint();
+        const horizontal = Math.hypot(end.x - from.x, end.z - from.z);
+        if (horizontal < 4) return null; // close shots: the normal camera shows them
+        // far shots (into the sea) do not pull the camera away from the bunny: at most 6.5 m to the side and 22 m back
+        const share = Math.min(0.38, 6.5 / horizontal);
+        const focus = from.clone().lerp(new THREE.Vector3(end.x, Math.max(end.y, this.state.world.data.waterLevel), end.z), share);
+        focus.y = Math.max(focus.y, from.y - 1.5);
+        return { focus, distance: Math.min(22, 6.5 + Math.min(horizontal, 26) * 0.6) };
     }
 
     refreshHud(full = false) {
@@ -676,7 +721,7 @@ export class Match {
         hud.stamina(s.stamina, turn.maxStamina, mine);
         hud.power(s.power, s.charging);
         const weapon = this.selectedWeapon();
-        const aimText = weapon?.kind === 'Airstrike' ? (s.airTarget ? 'Ziel gesetzt' : 'Ziel anklicken') : `Winkel ${Math.round(s.pitch * 180 / Math.PI)}°`;
+        const aimText = weapon?.kind === 'Airstrike' ? (s.airTarget ? 'Ziel gesetzt' : 'Ziel anklicken') : weapon?.kind === 'Hitscan' ? `Winkel ${Math.round(s.pitch * 180 / Math.PI)}°` : `Winkel ${Math.round(s.pitch * 180 / Math.PI)}° · Kraft ${Math.round(this.guidePower() * 100)} %`;
         hud.aimInfo(`${weapon?.name ?? '–'} · ${aimText}`);
         hud.controls(this.canAim(), mine, weapon?.kind === 'Airstrike' || weapon?.kind === 'Hitscan' ? 'Feuer' : 'Feuer (halten)');
         if (full) {
@@ -694,14 +739,21 @@ export class Match {
             return false;
         }
         const mine = this.isMine();
-        // keyboard camera turn (Q / E, ← / →)
-        if (input.isDown('KeyQ', 'ArrowLeft')) stage.rig.yaw += dt * 1.6;
-        if (input.isDown('KeyE', 'ArrowRight')) stage.rig.yaw -= dt * 1.6;
+        const fine = input.isDown('ShiftLeft', 'ShiftRight') ? FINE : 1;
+        // keys turn and tilt slowly at first (small corrections), faster when held; Shift = fine
+        const turning = input.isDown('KeyQ', 'ArrowLeft') || input.isDown('KeyE', 'ArrowRight');
+        s.yawHold = turning ? s.yawHold + dt : 0;
+        const yawSpeed = (0.5 + Math.min(1, s.yawHold / 0.6) * 1.1) * fine;
+        if (input.isDown('KeyQ', 'ArrowLeft')) stage.rig.yaw += dt * yawSpeed;
+        if (input.isDown('KeyE', 'ArrowRight')) stage.rig.yaw -= dt * yawSpeed;
 
         if (mine) this.walk(dt, input);
         if (this.canAim()) {
-            if (input.isDown('ArrowUp', 'KeyR')) s.pitch = Math.min(PITCH_MAX, s.pitch + dt * 0.9);
-            if (input.isDown('ArrowDown', 'KeyF')) s.pitch = Math.max(PITCH_MIN, s.pitch - dt * 0.9);
+            const tilting = input.isDown('ArrowUp', 'KeyR', 'ArrowDown', 'KeyF');
+            s.pitchHold = tilting ? s.pitchHold + dt : 0;
+            const pitchSpeed = (0.35 + Math.min(1, s.pitchHold / 0.6) * 0.75) * fine;
+            if (input.isDown('ArrowUp', 'KeyR')) s.pitch = Math.min(PITCH_MAX, s.pitch + dt * pitchSpeed);
+            if (input.isDown('ArrowDown', 'KeyF')) s.pitch = Math.max(PITCH_MIN, s.pitch - dt * pitchSpeed);
             if (s.charging) {
                 s.power = Math.min(1, (now - s.chargeStart) / 1000 / CHARGE_SECONDS);
                 if (s.power >= 1) this.releaseCharge();
@@ -710,15 +762,33 @@ export class Match {
             const moving = input.isDown('KeyW', 'KeyA', 'KeyS', 'KeyD');
             if (!moving) bunny.goalYaw = stage.rig.yaw;
             bunny.setAimPitch?.(s.pitch);
-            bunny.setAim(this.aimPoints(bunny, stage.rig.yaw, s.pitch, this.selectedWeapon(), s.charging ? s.power : 0.55));
+            const weapon = this.selectedWeapon();
+            const prediction = this.predict(bunny, weapon, stage.rig.yaw, s.pitch, this.guidePower());
+            bunny.setAim(weapon?.kind === 'Airstrike' ? null : prediction?.paths[0]?.points ?? null);
+            this.guide?.show(prediction, this.state.myTeam?.color, { data: world.data, dots: weapon?.kind !== 'Airstrike' });
+            // the aim camera: it moves between the bunny and the impact and backs off until both are in view (also while walking: no swing when the bunny stops)
+            // (frozen while charging, so the picture holds still; the zoom of the player wins)
+            if (!s.charging) {
+                const end = weapon?.kind === 'Airstrike' ? null : prediction?.impacts[0]?.point ?? prediction?.paths[0]?.end;
+                s.aimView = end ? this.aimView(bunny, end) : null;
+            }
             const a = s.lastAim;
             if (now - a.at > AIM_INTERVAL && (Math.abs(a.yaw - stage.rig.yaw) > 0.01 || Math.abs(a.pitch - s.pitch) > 0.01 || a.weaponId !== s.weaponId)) {
                 s.lastAim = { yaw: stage.rig.yaw, pitch: s.pitch, weaponId: s.weaponId ?? 0, at: now };
                 this.send('AimAt', r3(stage.rig.yaw), r3(s.pitch), s.weaponId ?? 0);
             }
-        } else if (mine) {
-            this.currentBunny()?.setAim(null);
+        } else {
+            s.aimView = null;
+            if (mine) {
+                this.currentBunny()?.setAim(null);
+                this.guide?.hide();
+            }
         }
+        stage.rig.autoDistance = s.aimView?.distance ?? 0;
+        stage.rig.autoPitch = s.aimView ? 0.62 : 0;
+        this.guide?.update(dt);
+        // the camera keeps up tightly while the own bunny walks, elsewhere it glides
+        stage.rig.followRate = this.walking ? 10 : 6;
 
         if (s.playback) {
             // late messages waiting: catch up faster
@@ -726,9 +796,8 @@ export class Match {
             stage.rig.focus(s.playback.focus ?? this.focusPoint());
             if (s.playback.done) this.playbackFinished();
         } else {
-            stage.rig.focus(this.focusPoint());
+            stage.rig.focus(s.aimView?.focus ?? this.focusPoint());
         }
-        if (s.airMarker?.visible) s.airMarker.rotation.z += dt;
 
         world.update(dt, now / 1000);
         stage.rig.update(dt, (x, z) => world.heightAt(x, z));

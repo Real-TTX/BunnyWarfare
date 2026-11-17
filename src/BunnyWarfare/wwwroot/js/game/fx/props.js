@@ -320,7 +320,7 @@ export function weaponModel(kind) {
         }
         case 'Airstrike': {
             const m = mesh(cached('radio', radioGeometry));
-            m.position.set(0.2, 0.2, 0.03);
+            m.position.set(0.4, 0.15, -0.06); // in the raised paw, next to the big head
             m.rotation.z = -0.25;
             g.add(m);
             break;
@@ -367,6 +367,20 @@ export function gravestoneGeometry() {
         paint(slab, stoneColor);
         paint(top, stoneColor);
         parts.push(slab, top);
+        // two stone bunny ears on top (one bent)
+        for (const s of [-1, 1]) {
+            const ear = new THREE.CapsuleGeometry(0.05, 0.16, 3, 8);
+            ear.scale(1, 1, 0.55);
+            ear.translate(0, 0.1, 0);
+            if (s > 0) {
+                ear.rotateZ(-0.9);
+                ear.translate(0.02, 0.06, 0);
+            }
+            ear.rotateZ(-s * 0.18);
+            ear.translate(s * 0.1, 0.72, 0);
+            paint(ear, stoneColor);
+            parts.push(ear);
+        }
         // the carved carrot on the front
         const carved = carrotGeometry(0.34, 0.07, 3);
         carved.scale(1, 1, 0.45);
@@ -449,7 +463,26 @@ export function ghostModel() {
     const halo = new THREE.Mesh(cached('halo', () => new THREE.TorusGeometry(0.13, 0.022, 6, 18)), haloMaterial.clone());
     halo.rotation.x = Math.PI / 2;
     halo.position.y = 0.48;
-    g.add(ghost, eyes, halo);
+    // two little flapping wings (the bunny flaps them: userData.wings, each with userData.side)
+    const wingGeometry = cached('ghost-wing', () => {
+        const wing = sphere(0.1, 10, 6);
+        wing.scale(1.25, 0.75, 0.22);
+        wing.translate(0.12, 0.02, 0);
+        wing.rotateZ(0.35);
+        const merged = merge([wing]);
+        merged.deleteAttribute('color');
+        return merged;
+    });
+    const wings = [-1, 1].map(s => {
+        const pivot = new THREE.Group();
+        pivot.position.set(s * 0.12, -0.02, -0.1);
+        pivot.scale.x = s;
+        pivot.userData.side = s;
+        pivot.add(new THREE.Mesh(wingGeometry, ghost.material));
+        return pivot;
+    });
+    g.add(ghost, eyes, halo, ...wings);
     g.userData.materials = [ghost.material, eyes.material, halo.material];
+    g.userData.wings = wings;
     return g;
 }

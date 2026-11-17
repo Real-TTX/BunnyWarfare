@@ -48,7 +48,16 @@ export class Stage {
         const h = this.container.clientHeight || window.innerHeight;
         this.renderer.setSize(w, h);
         this.camera.aspect = w / h;
+        // the HUD covers the bottom of the screen in a match: the picture is moved up so the bunny and its aim stay in the free part
+        if (this.centerShift) this.camera.setViewOffset(w, h, 0, h * this.centerShift, w, h);
+        else this.camera.clearViewOffset();
         this.camera.updateProjectionMatrix();
+    }
+
+    /** Moves the centre of the picture up by a share of the height (0 = centred). */
+    setCenterShift(share) {
+        this.centerShift = share;
+        this.resize();
     }
 
     /** Sky, fog and lights for a theme and an island of <width> metres. Returns the group everything of the island goes into. */
@@ -132,6 +141,11 @@ export class CameraRig {
         this.shakeAmount = 0;
         this.snapNext = true;
         this.orbitSpeed = 0;
+        this.followRate = 5; // how fast the camera catches up with its goal (higher = tighter)
+        this.autoDistance = 0; // a distance the game wants at least (the aim camera keeps bunny and impact in view); the zoom of the player may go further
+        this.shownDistance = null;
+        this.autoPitch = 0; // a pitch the game wants at least (the aim camera looks a little more from above); dragging the camera wins
+        this.shownPitch = null;
     }
 
     /** Where to look; snap = jump there at once. */
@@ -147,11 +161,17 @@ export class CameraRig {
 
     rotate(dx, dy) {
         this.yaw -= dx * 0.0055;
-        this.pitch = Math.min(1.35, Math.max(0.05, this.pitch + dy * 0.004));
+        if (dy !== 0) {
+            this.pitch = Math.min(1.35, Math.max(0.05, (this.shownPitch ?? this.pitch) + dy * 0.004));
+            this.manualPitch = true;
+        }
     }
 
+    /** The zoom of the player: starts from what is shown and from then on wins over the aim camera (until the game resets manualZoom). */
     zoom(delta) {
-        this.distance = Math.min(this.maxDistance, Math.max(3.5, this.distance * (1 + delta * 0.0012)));
+        const from = this.shownDistance ?? this.distance;
+        this.distance = Math.min(this.maxDistance, Math.max(3.5, from * (1 + delta * 0.0012)));
+        this.manualZoom = true;
     }
 
     shake(amount) {
@@ -172,12 +192,20 @@ export class CameraRig {
             this.target.copy(this.goal);
             this.snapNext = false;
             this.lift = null; // a jump to a new place takes the full lift at once
+            this.shownDistance = null; // ... and the distance and pitch it should have
+            this.shownPitch = null;
         } else {
-            this.target.lerp(this.goal, 1 - Math.exp(-dt * 5));
+            this.target.lerp(this.goal, 1 - Math.exp(-dt * this.followRate));
         }
-        const back = this.forward.multiplyScalar(-this.distance * Math.cos(this.pitch));
+        const wanted = Math.min(this.maxDistance, this.manualZoom ? this.distance : Math.max(this.distance, this.autoDistance));
+        this.shownDistance = this.shownDistance == null ? wanted : this.shownDistance + (wanted - this.shownDistance) * (1 - Math.exp(-dt * 3));
+        const distance = this.shownDistance;
+        const wantedPitch = this.manualPitch ? this.pitch : Math.max(this.pitch, this.autoPitch);
+        this.shownPitch = this.shownPitch == null ? wantedPitch : this.shownPitch + (wantedPitch - this.shownPitch) * (1 - Math.exp(-dt * 3));
+        const pitch = this.shownPitch;
+        const back = this.forward.multiplyScalar(-distance * Math.cos(pitch));
         const pos = this.target.clone().add(back);
-        pos.y += this.distance * Math.sin(this.pitch);
+        pos.y += distance * Math.sin(pitch);
         // never below the ground, and never behind a hill: sample the line of sight and lift the camera (smoothly) until it is free
         if (heightAt) {
             let lift = Math.max(0, heightAt(pos.x, pos.z) + 0.8 - pos.y);

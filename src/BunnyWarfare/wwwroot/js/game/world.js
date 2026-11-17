@@ -107,6 +107,7 @@ export class World {
         this.uniforms.uTime.value = time;
         this.uniforms.uWind.value.lerp(this.windGoal, 1 - Math.exp(-dt * 0.8));
         for (const b of this.bunnies.values()) b.update(dt, time);
+        this.vegetation.update(dt, this.uniforms.uWind.value);
         this.marker.update(dt);
         this.particles.update(dt);
         this.effects.update(dt);

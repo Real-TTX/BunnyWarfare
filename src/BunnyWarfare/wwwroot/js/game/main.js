@@ -130,8 +130,8 @@ const input = new Input(stage.renderer.domElement, {
         return false;
     },
     keyUp: code => (match.active && match.world ? match.keyUp(code) : false),
-    rotate: (dx, dy) => {
-        if (match.active && match.world) stage.rig.rotate(dx, dy);
+    rotate: (dx, dy, button, shift) => {
+        if (match.active && match.world && !match.aimDrag(dx, dy, button, shift)) stage.rig.rotate(dx, dy);
     },
     zoom: delta => {
         if (match.active && match.world) stage.rig.zoom(delta);
