@@ -11,7 +11,7 @@ public sealed class GameTicker(RoomRegistry registry, IServiceScopeFactory scope
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan EmptyLobbyLifetime = TimeSpan.FromMinutes(30);
-    private static readonly TimeSpan EmptyGameLifetime = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan PlayersGoneLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan FinishedLifetime = TimeSpan.FromMinutes(10);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,11 +41,15 @@ public sealed class GameTicker(RoomRegistry registry, IServiceScopeFactory scope
         {
             var messages = room.Tick(now);
 
-            // a running match without anyone watching ends after a while (the bots do not play alone forever)
-            if (room.Status == MatchStatus.Running && room.Connections.Count == 0 && now - room.LastActivity > EmptyGameLifetime)
+            // a running match whose players all left ends after a short grace (a reload reconnects in time): the bots do not play alone, spectators do not count
+            if (room.Status == MatchStatus.Running)
             {
-                messages.AddRange(room.Abort("Alle Spieler sind gegangen – das Spiel wurde beendet."));
-                room.NeedsSaving = true;
+                room.PlayersGoneSince = room.AnyPlayerConnected ? null : room.PlayersGoneSince ?? now;
+                if (room.PlayersGoneSince is { } gone && now - gone > PlayersGoneLifetime)
+                {
+                    messages.AddRange(room.Abort("Alle Spieler haben das Spiel verlassen – es wurde beendet."));
+                    room.NeedsSaving = true;
+                }
             }
 
             if (messages.Count > 0)

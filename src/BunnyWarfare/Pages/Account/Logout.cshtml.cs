@@ -12,6 +12,6 @@ public sealed class LogoutModel(AppDbContext db) : AppPageModel(db)
     public async Task<IActionResult> OnPostAsync()
     {
         await HttpContext.SignOutAsync(Identity.Scheme);
-        return Redirect("/Account/Login");
+        return Redirect("/");
     }
 }

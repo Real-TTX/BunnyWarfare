@@ -59,7 +59,7 @@ jobs:
       - name: Check the scripts of the game
         shell: bash
         run: |
-          for f in src/BunnyWarfare/wwwroot/js/game/*.js; do node --check --input-type=module < "$f" || exit 1; done
+          for f in src/BunnyWarfare/wwwroot/js/game/*.js src/BunnyWarfare/wwwroot/js/game/*/*.js; do node --check --input-type=module < "$f" || exit 1; done
           node --check src/BunnyWarfare/wwwroot/js/world-preview.js
 
       - name: Resolve version string

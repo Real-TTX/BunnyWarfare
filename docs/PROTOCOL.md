@@ -54,4 +54,31 @@ Errors (not your turn, no ammo ...) arrive as a `HubException` with a German mes
 
 `Aiming` (turn time; walk with stamina 9 m, shoot once) → `Resolving` (the browsers play the shot) → `Retreat` (3 s to run, humans only) → next team.
 A team without living bunnies is out; when one team is left it wins (none: a draw). Bots think for about two seconds, then shoot.
-A running match nobody watches for three minutes is aborted; after a restart of the server every running match is aborted (the state lives in memory).
+A running match without any of its players connected for 30 seconds is aborted (spectators do not count); after a restart of the server every running match is aborted (the state lives in memory).
+
+# The JSON API of the player app (`/api`, `Web/Api.cs`)
+
+The player app (`/`, `/Play/{token}`) is a single page: it talks to these endpoints and to the hub. Every call goes through the business layer
+(which checks the permission). Changes (POST, PUT) carry the antiforgery token of the session in the header `RequestVerificationToken`;
+the token changes with the user, so the app fetches `/api/session` again after login, registration and logout.
+Errors: `400 { error, field }` (field in camelCase or null), `401` not signed in, `403` denied.
+
+| Method | Path | Body / query | Answer |
+|---|---|---|---|
+| GET | `/api/session` (anonymous) | | `{ signedIn, player: { id, displayName, loginName, isAdmin, teamName, teamColor } \| null, canRegister, firstRun, version, antiforgery }` |
+| POST | `/api/session/login` (anonymous) | `{ loginName, password }` | session |
+| POST | `/api/session/register` (anonymous) | `{ displayName, loginName, password }` | session (the first account becomes the administrator) |
+| POST | `/api/session/logout` | | `{ ok }` |
+| GET | `/api/showcase?worldId=` (anonymous) | | `{ world: WorldDto, teams, bunnies }` — the island behind the menu |
+| GET | `/api/home` | | `{ announcement, stats: { gamesPlayed, gamesWon, kills, damageDealt, rank }, history[] }` |
+| GET | `/api/settings` | | `{ defaultTurnSeconds, maxTeamsPerMatch }` |
+| GET | `/api/worlds` | | `[{ id, name, description, theme, themeName, gridSize, width, gravity, maxWind }]` |
+| GET | `/api/worlds/{id}/terrain` | | `WorldDto` (height map for previews) |
+| GET | `/api/matches` | `q, status (lobby\|running\|mine), page` | `{ items[{ token, name, worldName, theme, hostName, status, maxTeams, seats, bunniesPerTeam, turnSeconds, createDate, isMine }], matching, total }` |
+| POST | `/api/matches` | `{ name, worldId, maxTeams, bunniesPerTeam, bunnyHealth, turnSeconds, isPublic }` | `{ token }` |
+| POST | `/api/matches/quick` | `{ worldId?, bots, level }` | `{ token }` (the app joins, adds the bots and starts) |
+| GET | `/api/leaderboard` | `q, sort (rank\|name\|games\|kills\|damage), dir, page` | `{ items[], matching, total }` |
+| GET/PUT | `/api/profile` | `{ displayName, teamName, teamColor }` | `{ displayName, loginName, teamName, teamColor, colors[] }` |
+| POST | `/api/profile/password` | `{ currentPassword, newPassword }` | `{ ok }` |
+
+Unauthenticated requests to `/api` and `/hub` get `401`; pages of the administration redirect to `/?returnUrl=...`, where the app signs in and returns.

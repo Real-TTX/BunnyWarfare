@@ -137,43 +137,138 @@ public sealed class Terrain
     }
 
     /// <summary>
-    /// Generates an island from a seed: fractal value noise, shaped by a falloff so the edges sink into the water.
-    /// The same parameters always give the same island.
+    /// Generates an island from a seed. The coast is a domain-warped noise shape (bays, capes, a few islets), the shore is a beach in most
+    /// places and a cliff in some, the inland has hills by fractal noise, and the theme adds its own landform: a pond on the meadow,
+    /// ridged peaks in the snow, wind-blown dunes in the desert, impact craters on the moon. The outer cells of the map are always deep
+    /// under the water, so the island never touches the border. The same parameters always give the same island.
     /// </summary>
-    public static Terrain Generate(int size, int seed, double hillHeight, double roughness, double waterLevel)
+    public static Terrain Generate(int size, int seed, double hillHeight, double roughness, double waterLevel, Data.WorldTheme theme = Data.WorldTheme.Meadow)
     {
         var heights = new float[size * size];
-        var persistence = 0.35 + 0.3 * Math.Clamp(roughness, 0, 1);
-        var basePeriod = Math.Max(8.0, size / 3.2);
+        var rough = Math.Clamp(roughness, 0, 1);
+        var persistence = 0.38 + 0.25 * rough;
         var center = (size - 1) / 2.0;
+        var random = new Random(seed);
+        var duneAngle = random.NextDouble() * Math.PI;
+        var pond = (X: center + (random.NextDouble() - 0.5) * size * 0.3, Z: center + (random.NextDouble() - 0.5) * size * 0.3, R: size * (0.06 + random.NextDouble() * 0.025));
+        var craters = Enumerable.Range(0, theme == Data.WorldTheme.Moon ? 5 + random.Next(4) : 0)
+            .Select(_ => (X: center + (random.NextDouble() - 0.5) * size * 0.7, Z: center + (random.NextDouble() - 0.5) * size * 0.7, R: size * (0.04 + random.NextDouble() * 0.07)))
+            .ToList();
+
         for (var iz = 0; iz < size; iz++)
         {
             for (var ix = 0; ix < size; ix++)
             {
-                double n = 0, amplitude = 1, total = 0, period = basePeriod;
-                for (var octave = 0; octave < 5; octave++)
+                // -1..1 across the map
+                var nx = (ix - center) / center;
+                var nz = (iz - center) / center;
+
+                // the coast: a warped, lumpy circle
+                var wx = nx + 0.34 * (Fbm(seed + 11, nx * 1.7 + 3, nz * 1.7, 3, 0.5) - 0.5);
+                var wz = nz + 0.34 * (Fbm(seed + 17, nx * 1.7, nz * 1.7 + 5, 3, 0.5) - 0.5);
+                var shape = 0.66 - Math.Sqrt(wx * wx + wz * wz) + 0.38 * (Fbm(seed + 23, nx * 2.4, nz * 2.4, 4, 0.5) - 0.5);
+
+                // never land near the border of the map: the outer 9 cells always lie under the water, the outer 6 at least 4 m deep
+                var border = Math.Min(Math.Min(ix, iz), Math.Min(size - 1 - ix, size - 1 - iz));
+                // (the limit itself wavers, so a coast that reaches it does not run along a straight line)
+                shape = Math.Min(shape, (border - 9 + 7 * (ValueNoise(seed + 61, ix / 6.0, iz / 6.0) - 0.5)) / (size * 0.14));
+
+                double h;
+                if (shape <= 0)
                 {
-                    n += amplitude * ValueNoise(seed + octave * 1013, ix / period, iz / period);
-                    total += amplitude;
-                    amplitude *= persistence;
-                    period /= 2;
+                    // the sea floor: shallow near the coast, then deep
+                    var depth = SmoothStep(0, 0.22, -shape);
+                    h = waterLevel - 0.5 - depth * 4.8 + 0.4 * (ValueNoise(seed + 31, ix / 5.0, iz / 5.0) - 0.5);
+                }
+                else
+                {
+                    // hills
+                    double n = 0, amplitude = 1, total = 0, period = Math.Max(8.0, size / 3.4);
+                    for (var octave = 0; octave < 5; octave++)
+                    {
+                        n += amplitude * ValueNoise(seed + octave * 1013, ix / period, iz / period);
+                        total += amplitude;
+                        amplitude *= persistence;
+                        period /= 2;
+                    }
+
+                    n /= total;
+                    var inland = SmoothStep(0.02, 0.32, shape);
+                    var relief = theme switch
+                    {
+                        // sharp ridges between soft valleys
+                        Data.WorldTheme.Snow => 0.55 * n + 0.45 * Ridged(seed + 41, ix / (size / 3.0), iz / (size / 3.0)),
+
+                        // dunes across the wind, on a gentle swell
+                        Data.WorldTheme.Desert => 0.55 * n + 0.45 * (0.5 + 0.5 * Math.Sin((ix * Math.Cos(duneAngle) + iz * Math.Sin(duneAngle)) / 4.2 + 5 * n)),
+                        _ => n,
+                    };
+                    var hills = hillHeight * Math.Pow(Math.Max(0, relief * 1.3 - 0.2), 1.25) * inland;
+
+                    // the shore: a beach that rises gently, or (where the noise says so) a cliff
+                    var cliff = SmoothStep(0.58, 0.72, ValueNoise(seed + 53, ix / 14.0, iz / 14.0)) * (theme == Data.WorldTheme.Desert ? 0.4 : 1);
+                    var beach = 0.15 + 0.9 * SmoothStep(0, 0.16, shape);
+                    var rim = 0.15 + Math.Min(1, shape / 0.04) * (1.8 + hillHeight * 0.18);
+                    var shore = beach * (1 - cliff) + rim * cliff;
+                    h = waterLevel + shore + hills;
+
+                    // ledges in the snow
+                    if (theme == Data.WorldTheme.Snow && inland > 0.5)
+                    {
+                        const double step = 1.6;
+                        var level = Math.Floor((h - waterLevel) / step) * step + waterLevel;
+                        h = h + (level + step * SmoothStep(0.15, 0.85, (h - level) / step) - h) * 0.35 * inland;
+                    }
                 }
 
-                n /= total;
+                // a pond on the meadow
+                if (theme == Data.WorldTheme.Meadow)
+                {
+                    var d = Math.Sqrt((ix - pond.X) * (ix - pond.X) + (iz - pond.Z) * (iz - pond.Z)) / pond.R * (1 + 0.55 * (Fbm(seed + 71, ix / 7.0, iz / 7.0, 2, 0.5) - 0.5));
+                    if (d < 3.2 && h > waterLevel)
+                    {
+                        // a shallow bowl, and around it the land sinks gently to a flat bank (no steep walls)
+                        var bowl = waterLevel - 0.7 * (1 - Math.Min(1, d * d));
+                        h = d < 1 ? Math.Min(h, bowl) : h + (waterLevel + 0.25 + 0.35 * (d - 1) - h) * SmoothStep(3.2, 1, d);
+                    }
+                }
 
-                // distance from the middle, 0 in the middle and 1 at the edge (a rounded square)
-                var dx = Math.Abs(ix - center) / center;
-                var dz = Math.Abs(iz - center) / center;
-                var d = Math.Pow(Math.Pow(dx, 4) + Math.Pow(dz, 4), 0.25);
-                var mask = SmoothStep(0.98, 0.62, d);
+                // impact craters on the moon: a bowl with a raised rim
+                foreach (var c in craters)
+                {
+                    var d = Math.Sqrt((ix - c.X) * (ix - c.X) + (iz - c.Z) * (iz - c.Z)) / c.R;
+                    if (d < 1.5 && h > waterLevel)
+                    {
+                        h += d < 1 ? -1.6 * (1 - d * d) : 0.9 * Math.Sin((d - 1) / 0.5 * Math.PI) * (1 - (d - 1) / 0.5);
+                    }
+                }
 
-                var land = 0.7 + hillHeight * Math.Pow(Math.Max(0, n * 1.25 - 0.18), 1.35);
-                var h = waterLevel + mask * land - (1 - mask) * 3.5;
-                heights[iz * size + ix] = (float)h;
+                heights[iz * size + ix] = (float)Math.Clamp(h, Bedrock, waterLevel + 22);
             }
         }
 
         return new Terrain(size, heights, waterLevel);
+    }
+
+    private static double Fbm(int seed, double x, double z, int octaves, double persistence)
+    {
+        double n = 0, amplitude = 1, total = 0, frequency = 1;
+        for (var o = 0; o < octaves; o++)
+        {
+            n += amplitude * ValueNoise(seed + o * 7919, x * frequency, z * frequency);
+            total += amplitude;
+            amplitude *= persistence;
+            frequency *= 2;
+        }
+
+        return n / total;
+    }
+
+    /// <summary>Ridged noise: sharp crests where the noise crosses its middle.</summary>
+    private static double Ridged(int seed, double x, double z)
+    {
+        var r = 1 - Math.Abs(2 * Fbm(seed, x, z, 4, 0.5) - 1);
+        return r * r;
     }
 
     private static double SmoothStep(double edge0, double edge1, double x)

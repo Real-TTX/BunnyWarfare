@@ -93,10 +93,10 @@ public sealed class EditModel(AppDbContext db) : AppPageModel(db)
         });
 
     /// <summary>The height map for the preview (generated, nothing is saved).</summary>
-    public IActionResult OnGetPreview(int gridSize, int seed, double hillHeight, double roughness, double waterLevel)
+    public IActionResult OnGetPreview(int gridSize, int seed, double hillHeight, double roughness, double waterLevel, WorldTheme theme)
     {
         var size = Math.Clamp(gridSize, WorldLogic.MinGridSize, WorldLogic.MaxGridSize);
-        var terrain = Terrain.Generate(size, seed, Math.Clamp(hillHeight, 1, 20), Math.Clamp(roughness, 0, 1), Math.Clamp(waterLevel, -2, 4));
+        var terrain = Terrain.Generate(size, seed, Math.Clamp(hillHeight, 1, 20), Math.Clamp(roughness, 0, 1), Math.Clamp(waterLevel, -2, 4), theme);
         return new JsonResult(new { size, waterLevel = terrain.WaterLevel, hillHeight, width = terrain.Width, heights = terrain.ToBase64() });
     }
 }

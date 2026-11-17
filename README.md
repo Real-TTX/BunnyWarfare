@@ -5,11 +5,12 @@
 Rundenbasierte **3D-Artillerie mit Hasen** im Browser: Teams aus Hasen bekämpfen sich auf kleinen Inseln mit Karotten, Rüben und Kohlköpfen.
 Allein gegen Bots oder mit Freunden über das Netz – mit einer Administration für Spieler, Spiele, Welten und Waffen.
 
-- **Spiel:** three.js (3D, zerstörbares Gelände, Wind, Wasser), Echtzeit über SignalR, der Server rechnet jeden Schuss (keine Schummelei im Browser).
+- **Spiel für Spieler: komplett 3D** – Hauptmenü, Anmeldung, Online-Lobbys, Neues Spiel, Rangliste, Profil und das Spiel selbst laufen in einer Vollbild-App über einer lebenden Insel (three.js, Cartoon-Look). Der Server rechnet jeden Schuss (keine Schummelei im Browser), Echtzeit über SignalR.
+- **Welten mit Details:** natürliche Küsten mit Stränden und Klippen, animiertes Wasser mit Schaum, Gras im Wind, Bäume, Karottenbeete, Tiere, Wolken – kein sichtbarer Kartenrand; Deko wird von Explosionen zerstört.
 - **Multiplayer:** Lobby mit Einladungslink, 2–8 Teams, Bots in drei Stärken, Zuschauen, Chat, Rangliste.
 - **Waffen:** Karottenwerfer (Wind), Rübengranate (springt, Zünder), Kohlkopf-Splitter (Bomblets), Löwenzahn-Flinte (Schrot), Möhrenregen (Luftschlag) – alle in der Administration änderbar.
 - **Welten:** Möhrenwiese, Frostbau, Dünenland, Mondkrater (wenig Schwerkraft) – aus einem Seed erzeugt, mit Vorschau in der Administration.
-- **Administration** unter `/Admin`: Übersicht (live), Spieler, Spiele (beenden, löschen), Welten, Waffen, System. Design: MatUi aus [MatDesign](https://github.com/Real-TTX/MatDesign).
+- **Administration** unter `/Admin` (nur Administratoren, nur sie sehen die klassische Oberfläche): Übersicht (live), Spieler, Spiele (beenden, löschen), Welten, Waffen, System. Design: MatUi aus [MatDesign](https://github.com/Real-TTX/MatDesign).
 
 Stack: ASP.NET Core 10 (Razor Pages, SignalR), PostgreSQL 17 (EF Core), three.js r187, Docker. Port **2772**.
 
@@ -55,9 +56,13 @@ src/BunnyWarfare/
   Data/        Entitäten (PascalCase, Id bigint, Audit-Spalten, UpdateState), DbContext, Migrationen
   Business/    statische Klassen mit der Logik und den Berechtigungsprüfungen (PlayerLogic, MatchLogic, WorldLogic, WeaponLogic, SettingLogic, SeedLogic)
   Game/        Terrain, Simulation (Physik), Bot, MatchRoom (Lobby/Züge), RoomRegistry, GameHub (SignalR), GameTicker
-  Pages/       Razor Pages: Start, Spielen, Rangliste, Konto, Admin/*; Play/Game = das Spiel (eigene Oberfläche)
+  Web/Api.cs   die JSON-API der Spieler-App (/api, siehe docs/PROTOCOL.md)
+  Pages/       App = die 3D-Spieler-App ("/" und "/Play/{token}"); Admin/* = Administration (MatUi), About
   Controls/    Tag-Helper: md-field, md-buttons, md-table, md-tabs, md-tab-group
-  wwwroot/     matui/ (MatUi, kopiert), lib/ (three.js, SignalR), js/game/ (der Spiel-Client), css/, img/logo/
+  wwwroot/     matui/ (MatUi, kopiert), lib/ (three.js, SignalR), fonts/ (Lilita One, Nunito; OFL), img/logo/,
+               css/play.css + effects.css (Spieler-App), css/app.css (Administration),
+               js/game/ (main = Einstieg/Router, menu, showcase, match, hud, api; world/ = Insel, Wasser, Himmel, Pflanzen, Tiere;
+               bunny + fx/ = Hasen und Waffen; effects, playback = Explosionen und Schüsse)
 tests/BunnyWarfare.Tests   Simulation, Rundenlogik, Berechtigungen
 docs/PROTOCOL.md           das Protokoll zwischen Browser und Server
 ```

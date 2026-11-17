@@ -55,7 +55,7 @@
 
   function refresh() {
     var query = new URLSearchParams({
-      gridSize: value('GridSize'), seed: value('Seed'), hillHeight: value('HillHeight'), roughness: value('Roughness'), waterLevel: value('WaterLevel')
+      gridSize: value('GridSize'), seed: value('Seed'), hillHeight: value('HillHeight'), roughness: value('Roughness'), waterLevel: value('WaterLevel'), theme: value('Theme')
     });
     fetch(canvas.getAttribute('data-preview-url') + '&' + query.toString(), { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })

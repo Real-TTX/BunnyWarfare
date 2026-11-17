@@ -43,6 +43,39 @@ public sealed class SimulationTests
         Assert.True(a.HeightAt(a.Width, a.Width) < 0);
     }
 
+    [Theory]
+    [InlineData(WorldTheme.Meadow, 96, 1337, 7, 0.45, 0)]
+    [InlineData(WorldTheme.Snow, 88, 4242, 10, 0.65, 0.5)]
+    [InlineData(WorldTheme.Desert, 112, 777, 5, 0.3, -0.5)]
+    [InlineData(WorldTheme.Moon, 80, 9001, 6, 0.8, -1.5)]
+    [InlineData(WorldTheme.Meadow, 48, 1, 20, 1, 4)]
+    [InlineData(WorldTheme.Snow, 160, 99, 1, 0, -2)]
+    public void Island_HasDeepBorders_AndEnoughLand(WorldTheme theme, int size, int seed, double hill, double rough, double water)
+    {
+        var t = Terrain.Generate(size, seed, hill, rough, water, theme);
+        var land = 0;
+        for (var iz = 0; iz < size; iz++)
+        {
+            for (var ix = 0; ix < size; ix++)
+            {
+                var h = t.Heights[iz * size + ix];
+                var border = Math.Min(Math.Min(ix, iz), Math.Min(size - 1 - ix, size - 1 - iz));
+                if (border < 6)
+                {
+                    Assert.True(h < water - 2.5, $"border cell {ix},{iz} at {h}");
+                }
+
+                if (h > water + 0.4)
+                {
+                    land++;
+                }
+            }
+        }
+
+        var share = land / (double)(size * size);
+        Assert.InRange(share, 0.22, 0.75);
+    }
+
     [Fact]
     public void Crater_LowersTheGroundInsideTheRadiusOnly()
     {

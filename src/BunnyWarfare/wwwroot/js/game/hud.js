@@ -1,40 +1,14 @@
-// Everything on top of the scene: lobby, turn banner, timer, wind, teams, weapons, power, chat, toasts, game over.
-const $ = id => document.getElementById(id);
-
-function el(tag, className, text) {
-    const e = document.createElement(tag);
-    if (className) e.className = className;
-    if (text !== undefined) e.textContent = text;
-    return e;
-}
-
-const LEVELS = { Easy: 'leicht', Normal: 'normal', Hard: 'schwer' };
-const THEMES = { Meadow: 'Möhrenwiese', Snow: 'Frostbau', Desert: 'Dünenland', Moon: 'Mondkrater' };
-const KIND_GLYPH = { Projectile: '🥕', Grenade: '🟣', Cluster: '🥬', Hitscan: '•••', Airstrike: '✈' };
-
-export const themeName = theme => THEMES[theme] ?? theme;
+// Everything on top of a match: the lobby room, the turn banner, timer, wind, teams, weapons, power, chat and the end with its podium.
+import { $, el, icon, button, toast, copyText, themeName, LEVEL_NAMES } from './ui.js';
+import { weaponIcon, seatBadge, bunnyAvatar } from './icons.js';
+import { mapCanvasByName } from './maps.js';
 
 export class Hud {
     constructor() {
         this.root = $('bw-hud');
         this.weaponButtons = new Map();
-    }
-
-    loading(on) {
-        $('bw-loading').hidden = !on;
-    }
-
-    banner(text) {
-        const b = $('bw-banner');
-        b.hidden = !text;
-        b.textContent = text ?? '';
-    }
-
-    toast(text, tone = 'danger') {
-        const t = el('div', `bw-toast bw-toast--${tone}`, text);
-        $('bw-toasts').appendChild(t);
-        setTimeout(() => t.classList.add('is-leaving'), 3200);
-        setTimeout(() => t.remove(), 3700);
+        this.lobbyMap = null;
+        this.chatLogs = [$('bw-chat-log')];
     }
 
     show(on) {
@@ -43,81 +17,210 @@ export class Hud {
 
     // ------------------------------------------------------------ lobby
 
+    /** The room before the start: seats, bots, rules, the map of the world, the chat. actions: addBot, remove, start, leave. */
     lobby(room, me, actions) {
-        $('bw-lobby').hidden = false;
-        $('bw-lobby-name').textContent = room.name;
-        $('bw-lobby-rules').textContent =
-            `${themeName(room.theme)} · ${room.worldName} · ${room.bunniesPerTeam} Hasen pro Team · ${room.bunnyHealth} Leben · ${room.turnSeconds} s pro Zug`;
+        const layer = $('layer-lobby');
+        layer.hidden = false;
         const host = room.hostPlayerId === me;
-        const list = $('bw-slots');
-        list.replaceChildren();
+        const panel = layer.querySelector('.panel') ?? this.buildLobby(layer, actions);
+
+        panel.querySelector('[data-name]').textContent = room.name;
+        const slots = panel.querySelector('[data-slots]');
+        slots.replaceChildren();
         for (const s of room.slots) {
-            const li = el('li', 'bw-slot');
-            const sw = el('span', 'bw-swatch');
-            sw.style.setProperty('--bw-team', s.color);
-            const text = el('div', 'bw-slot__text');
-            text.append(el('strong', '', s.teamName), el('small', 'mat-muted', s.isBot ? `Bot (${LEVELS[s.botLevel] ?? s.botLevel})` : s.playerName));
-            const dot = el('span', `bw-dot ${s.connected ? 'is-on' : ''}`);
+            const mine = s.playerId === me;
+            const li = el('li', `slot${mine ? ' is-me' : ''}`);
+            const text = el('div', null, [
+                el('strong', null, s.teamName),
+                el('small', null, s.isBot ? `Computer · ${LEVEL_NAMES[s.botLevel] ?? s.botLevel}` : s.playerName),
+            ]);
+            const actionsBox = el('div', 'actions');
+            if (s.playerId === room.hostPlayerId) actionsBox.append(el('span', 'badge host', 'Gastgeber'));
+            if (mine) actionsBox.append(el('span', 'badge mine', 'Du'));
+            const dot = el('span', `dot${s.connected ? ' on' : ''}`);
             dot.title = s.connected ? 'verbunden' : 'nicht verbunden';
-            li.append(sw, text);
-            if (s.playerId === room.hostPlayerId) li.append(el('span', 'mat-pill mat-pill--accent', 'Gastgeber'));
-            if (s.playerId === me) li.append(el('span', 'mat-pill mat-pill--plain', 'Du'));
-            li.append(dot);
-            const removable = (host && s.playerId !== me) || (!host && s.playerId === me);
-            if (removable) {
-                const x = el('button', 'mat-btn mat-btn--ghost mat-btn--sm', host ? 'Entfernen' : 'Platz freigeben');
-                x.type = 'button';
-                x.onclick = () => actions.remove(s.teamIndex);
-                li.append(x);
+            actionsBox.append(dot);
+            if ((host && !mine) || (!host && mine)) {
+                actionsBox.append(button(null, {
+                    className: 'round-btn small', iconName: 'x', title: host ? 'Entfernen' : 'Platz freigeben', onClick: () => actions.remove(s.teamIndex),
+                }));
             }
-            list.append(li);
+            li.append(seatBadge(s.color, s.isBot), text, actionsBox);
+            slots.append(li);
         }
         for (let i = room.slots.length; i < room.maxTeams; i++) {
-            const li = el('li', 'bw-slot bw-slot--free');
-            li.append(el('span', 'bw-swatch'), el('div', 'bw-slot__text mat-muted', 'Freier Platz'));
-            list.append(li);
+            const li = el('li', 'slot is-free');
+            const text = el('div', null, [el('strong', null, 'Freier Platz'), el('small', null, host ? 'Einladen oder einen Bot dazunehmen' : 'Wartet auf Mitspieler')]);
+            const box = el('div', 'actions');
+            if (host) {
+                for (const level of ['Easy', 'Normal', 'Hard']) {
+                    box.append(button(`+ ${LEVEL_NAMES[level]}`, { className: 'btn small', title: `Bot (${LEVEL_NAMES[level]}) dazunehmen`, onClick: () => actions.addBot(level) }));
+                }
+            }
+            li.append(seatBadge('#e9dccb', false, true), text, box);
+            slots.append(li);
         }
-        const bots = $('bw-lobby-bots');
-        bots.hidden = !host || room.slots.length >= room.maxTeams;
-        for (const b of bots.querySelectorAll('[data-bot]')) b.onclick = () => actions.addBot(b.dataset.bot);
-        const start = $('bw-btn-start');
+
+        const rules = panel.querySelector('[data-rules]');
+        rules.replaceChildren(...[
+            themeName(room.theme) !== room.worldName ? el('span', null, themeName(room.theme)) : null,
+            el('span', null, `${room.bunniesPerTeam} Hasen pro Team`),
+            el('span', null, `${room.bunnyHealth} Leben`),
+            el('span', null, `${room.turnSeconds} s pro Zug`),
+            el('span', null, `bis ${room.maxTeams} Teams`)].filter(Boolean));
+        panel.querySelector('[data-world]').textContent = room.worldName;
+        if (this.lobbyMap?.name !== room.worldName) {
+            const holder = panel.querySelector('[data-map]');
+            const canvas = mapCanvasByName(room.worldName);
+            holder.replaceChildren(canvas);
+            this.lobbyMap = { name: room.worldName };
+        }
+
+        const start = panel.querySelector('[data-start]');
         start.hidden = !host;
         start.disabled = room.slots.length < 2;
-        start.onclick = () => actions.start();
-        $('bw-lobby-hint').textContent = host
-            ? (room.slots.length < 2 ? 'Lade Freunde mit dem Link ein oder nimm einen Bot dazu – ab zwei Teams geht es los.' : 'Alles bereit? Dann los!')
-            : 'Warte, bis der Gastgeber das Spiel startet.';
-        $('bw-btn-invite').onclick = () => actions.invite();
+        panel.querySelector('[data-hint]').textContent = host
+            ? (room.slots.length < 2 ? 'Lade Freunde mit dem Link ein oder nimm einen Bot dazu – ab zwei Teams geht es los.' : 'Alles bereit? Dann ab aufs Schlachtfeld!')
+            : 'Gleich geht es los – der Gastgeber startet das Spiel.';
+    }
+
+    buildLobby(layer, actions) {
+        const panel = el('section', 'panel wide');
+        panel.setAttribute('aria-label', 'Lobby');
+        const head = el('div', 'panel-head', [
+            button(null, { className: 'round-btn', iconName: 'back', title: 'Lobby verlassen', onClick: () => actions.leave() }),
+            el('h2', 'title', [document.createTextNode('Lobby '), el('span', 'tag', '')]),
+            el('span', 'spacer'),
+            button('Einladungslink kopieren', {
+                className: 'btn small', iconName: 'link', onClick: async () => {
+                    const link = actions.link();
+                    if (await copyText(link)) toast('Einladungslink kopiert.', 'success');
+                    else window.prompt('Einladungslink:', link);
+                },
+            }),
+        ]);
+        head.querySelector('.tag').dataset.name = '';
+        const slots = el('ul', 'slots');
+        slots.dataset.slots = '';
+        slots.style.listStyle = 'none';
+        slots.style.margin = '0';
+        slots.style.padding = '0';
+
+        const left = el('div', 'stack', [el('h3', 'h3', [icon('users'), document.createTextNode('Teams')]), slots]);
+        // the chat goes under the seats, so the island and the rules fit beside them
+        const map = el('div', 'lobby-world');
+        map.dataset.map = '';
+        const worldName = el('div', 'muted');
+        worldName.dataset.world = '';
+        worldName.style.textAlign = 'center';
+        worldName.style.marginTop = '8px';
+        const rules = el('div', 'rules');
+        rules.dataset.rules = '';
+
+        const chatLog = el('div', 'chatlog');
+        chatLog.setAttribute('aria-live', 'polite');
+        this.chatLogs.push(chatLog);
+        const chatInput = el('input', 'field');
+        chatInput.maxLength = 200;
+        chatInput.placeholder = 'Sag hallo …';
+        chatInput.setAttribute('aria-label', 'Chat-Nachricht');
+        const chatForm = el('form', 'chatform', [chatInput, button(null, { className: 'round-btn small', iconName: 'arrow-right', title: 'Senden', type: 'submit' })]);
+        chatForm.addEventListener('submit', e => {
+            e.preventDefault();
+            const text = chatInput.value.trim();
+            chatInput.value = '';
+            if (text) actions.chat(text);
+        });
+
+        const right = el('div', 'stack', [
+            el('h3', 'h3', [icon('globe-map'), document.createTextNode('Insel')]),
+            map, worldName, rules,
+        ]);
+        left.append(el('div', 'lobby-chat', [el('h3', 'h3', [icon('message-square'), document.createTextNode('Chat')]), chatLog, chatForm]));
+
+        const hint = el('p', 'sub');
+        hint.dataset.hint = '';
+        const start = button('Spiel starten', { className: 'btn big primary', iconName: 'play', onClick: () => actions.start() });
+        start.dataset.start = '';
+        const foot = el('div', 'panel-foot', [hint, el('span', 'spacer'), button('Verlassen', { className: 'btn ghost', iconName: 'logout', onClick: () => actions.leave() }), start]);
+
+        panel.append(head, el('div', 'grid2', [left, right]), foot);
+        layer.replaceChildren(panel);
+        return panel;
     }
 
     hideLobby() {
-        $('bw-lobby').hidden = true;
+        const layer = $('layer-lobby');
+        layer.hidden = true;
+        const log = layer.querySelector('.chatlog');
+        this.chatLogs = this.chatLogs.filter(l => l !== log);
+        layer.replaceChildren();
+        this.lobbyMap = null;
     }
 
     // ------------------------------------------------------------ game over
 
-    gameOver(result, onView) {
-        $('bw-over').hidden = false;
-        $('bw-over-title').textContent = result.aborted ? 'Spiel abgebrochen' : result.winnerName ? `${result.winnerName} gewinnt!` : 'Unentschieden';
-        $('bw-over-sub').textContent = result.aborted ? 'Das Spiel wurde vorzeitig beendet.' : result.winnerName ? 'Ehre den Löffelohren!' : 'Kein Hase hat überlebt.';
-        const rows = $('bw-over-rows');
-        rows.replaceChildren();
-        for (const t of result.teams ?? []) {
-            const tr = el('tr');
-            const place = el('td', 'mat-mono', t.placement > 0 ? `${t.placement}.` : '–');
-            const name = el('td');
-            const sw = el('span', 'bw-swatch');
-            sw.style.setProperty('--bw-team', t.color);
-            name.append(sw, document.createTextNode(` ${t.name}${t.isBot ? ' (Bot)' : ''}`));
-            tr.append(place, name, el('td', 'mat-num mat-mono', String(t.kills)), el('td', 'mat-num mat-mono', String(t.damage)));
-            rows.append(tr);
+    /** The end: winner, podium, ranking. actions: again, menu, view (hide the panel and look at the island). */
+    gameOver(result, myTeam, actions) {
+        const layer = $('layer-over');
+        layer.hidden = false;
+        const teams = [...(result.teams ?? [])].sort((a, b) => (a.placement || 99) - (b.placement || 99));
+        const won = !result.aborted && result.winnerTeam !== null && result.winnerTeam !== undefined && result.winnerTeam === myTeam;
+        const title = result.aborted ? 'Abgebrochen' : !result.winnerName ? 'Unentschieden' : won ? 'Sieg!' : myTeam === null ? 'Vorbei!' : 'Verloren!';
+        const sub = result.aborted
+            ? 'Das Spiel wurde vorzeitig beendet.'
+            : !result.winnerName ? 'Kein Hase hat überlebt.'
+                : won ? `${result.winnerName} gewinnt – Ehre den Löffelohren!` : `${result.winnerName} gewinnt. Nächstes Mal klappt’s!`;
+
+        const podium = el('div', 'podium');
+        const order = [teams[1], teams[0], teams[2]];
+        const classes = ['second', 'first', 'third'];
+        order.forEach((t, i) => {
+            if (!t) return;
+            const avatar = el('div', 'avatar');
+            avatar.style.setProperty('--team', t.color);
+            avatar.style.background = t.color;
+            avatar.append(bunnyAvatar(t.color, { wink: i === 1 }));
+            podium.append(el('div', `place ${classes[i]}`, [
+                el('div', 'who', [avatar, el('b', null, t.name), el('small', null, `${t.kills} K.O. · ${t.damage} Schaden`)]),
+                el('div', 'block', String(t.placement || '–')),
+            ]));
+        });
+
+        const table = el('table', 'table');
+        table.innerHTML = '<thead><tr><th>Platz</th><th>Team</th><th class="num">K.O.</th><th class="num">Schaden</th></tr></thead>';
+        const body = el('tbody');
+        for (const t of teams) {
+            const tr = el('tr', t.index === myTeam ? 'is-me' : null);
+            const sw = el('span', 'swatch');
+            sw.style.setProperty('--c', t.color);
+            tr.append(
+                el('td', 'rank', t.placement > 0 ? `${t.placement}.` : '–'),
+                el('td', null, el('div', 'teamcell', [sw, el('span', null, `${t.name}${t.isBot ? ' (Bot)' : ''}`)])),
+                el('td', 'num', String(t.kills)),
+                el('td', 'num', String(t.damage)));
+            body.append(tr);
         }
-        const view = $('bw-over-view');
-        view.hidden = !onView;
-        view.onclick = () => {
-            $('bw-over').hidden = true;
-            onView?.();
-        };
+        table.append(body);
+
+        const panel = el('section', 'panel', [
+            el('div', 'over-head', [el('div', 'crown', result.aborted ? '🏳️' : won ? '🏆' : result.winnerName ? '🥕' : '🤝'), el('h2', 'title', title), el('p', 'lead muted', sub)]),
+            podium,
+            table,
+            el('div', 'panel-foot', [
+                actions.view ? button('Insel ansehen', { className: 'btn ghost', iconName: 'eye', onClick: () => actions.view() }) : null,
+                el('span', 'spacer'),
+                button('Zum Menü', { className: 'btn', iconName: 'home', onClick: () => actions.menu() }),
+                button('Nochmal!', { className: 'btn big primary', iconName: 'refresh', onClick: () => actions.again() }),
+            ]),
+        ]);
+        layer.replaceChildren(panel);
+    }
+
+    hideOver() {
+        const layer = $('layer-over');
+        layer.hidden = true;
+        layer.replaceChildren();
     }
 
     // ------------------------------------------------------------ turn
@@ -125,8 +228,9 @@ export class Hud {
     turn({ title, sub, color, mine }) {
         $('bw-turn-title').textContent = title;
         $('bw-turn-sub').textContent = sub ?? '';
-        $('bw-turn-dot').style.background = color ?? '#888';
-        $('bw-turn').classList.toggle('is-mine', !!mine);
+        const box = $('bw-turn');
+        box.style.setProperty('--c', color ?? '#9a8a78');
+        box.classList.toggle('is-mine', !!mine);
         this.root.classList.toggle('is-my-turn', !!mine);
     }
 
@@ -148,10 +252,11 @@ export class Hud {
         const windYaw = Math.atan2(windX, windZ);
         // up on the screen is the direction the camera looks; turning right lowers the yaw
         const screen = -(windYaw - cameraYaw);
-        $('bw-wind-arrow').style.transform = `rotate(${screen}rad)`;
-        $('bw-wind-arrow').style.opacity = strength < 0.05 ? '0.25' : '1';
+        const arrow = $('bw-wind-arrow');
+        arrow.style.transform = `rotate(${screen}rad)`;
+        arrow.style.opacity = strength < 0.05 ? '0.25' : '1';
         $('bw-wind-fill').style.width = `${share * 100}%`;
-        $('bw-wind-text').textContent = strength < 0.05 ? 'Windstill' : `Wind ${strength.toFixed(1)}`;
+        $('bw-wind-text').textContent = strength < 0.05 ? 'Windstill' : `Wind ${strength.toFixed(1).replace('.', ',')}`;
     }
 
     stamina(value, max, visible) {
@@ -161,25 +266,24 @@ export class Hud {
 
     teams(teams, bunnies, currentTeam) {
         const box = $('bw-teams');
-        box.replaceChildren(el('h2', 'bw-teams__title', 'Teams'));
+        box.replaceChildren(el('h2', null, 'Teams'));
         // bunnies may be an iterator (Map.values()): read it once, not once per team
         const all = [...bunnies];
         for (const t of teams) {
             const own = all.filter(b => b.team === t.index);
             const hp = own.reduce((sum, b) => sum + Math.max(0, b.health), 0);
             const max = own.reduce((sum, b) => sum + b.maxHealth, 0) || 1;
-            const row = el('div', `bw-team ${t.index === currentTeam ? 'is-current' : ''} ${t.out ? 'is-out' : ''}`);
-            const head = el('div', 'bw-team__head');
-            const sw = el('span', 'bw-swatch');
-            sw.style.setProperty('--bw-team', t.color);
-            head.append(sw, el('span', 'bw-team__name', t.name + (t.isBot ? ' 🤖' : '')), el('span', 'bw-team__hp', String(hp)));
-            const bar = el('div', 'bw-bar bw-bar--team');
-            const fill = el('span');
+            const alive = own.filter(b => b.alive !== false && b.health > 0).length;
+            const sw = el('span', 'swatch');
+            sw.style.setProperty('--c', t.color);
+            const fill = el('i');
             fill.style.width = `${(hp / max) * 100}%`;
             fill.style.background = t.color;
-            bar.append(fill);
-            row.append(head, bar);
-            if (t.kills > 0) row.append(el('small', 'bw-team__kills', `${t.kills} Treffer`));
+            const row = el('div', `hteam${t.index === currentTeam ? ' is-current' : ''}${t.out ? ' is-out' : ''}`, [
+                el('div', 'head', [sw, el('span', 'name', t.name + (t.isBot ? ' · Bot' : '')), el('span', null, String(hp))]),
+                el('div', 'bar', fill),
+                el('small', null, `${alive} Hasen${t.kills > 0 ? ` · ${t.kills} K.O.` : ''}`),
+            ]);
             box.append(row);
         }
     }
@@ -190,10 +294,10 @@ export class Hud {
             bar.replaceChildren();
             this.weaponButtons.clear();
             weapons.forEach((w, i) => {
-                const b = el('button', 'bw-weapon');
+                const b = el('button', 'weapon');
                 b.type = 'button';
-                b.title = `${w.name} – ${w.damage} Schaden, Radius ${w.radius} m${w.wind ? ', windanfällig' : ''}`;
-                b.append(el('span', 'bw-weapon__key', String(i + 1)), el('span', 'bw-weapon__glyph', KIND_GLYPH[w.kind] ?? '•'), el('span', 'bw-weapon__name', w.name), el('span', 'bw-weapon__ammo', ''));
+                b.title = `${w.name} – ${w.damage} Schaden, Radius ${String(w.radius).replace('.', ',')} m${w.wind ? ', windanfällig' : ''}`;
+                b.append(el('span', 'key', String(i + 1)), weaponIcon(w.kind), el('span', 'nm', w.name), el('span', 'ammo', ''));
                 b.onclick = () => onSelect(w.id);
                 bar.append(b);
                 this.weaponButtons.set(w.id, b);
@@ -202,15 +306,20 @@ export class Hud {
         for (const w of weapons) {
             const b = this.weaponButtons.get(w.id);
             const left = ammoLeft(w, team);
-            b.querySelector('.bw-weapon__ammo').textContent = left < 0 ? '∞' : String(left);
-            b.classList.toggle('is-selected', w.id === selectedId);
+            b.querySelector('.ammo').textContent = left < 0 ? '∞' : String(left);
+            b.classList.toggle('is-on', w.id === selectedId);
             b.disabled = !enabled || left === 0;
         }
     }
 
+    resetWeapons() {
+        this.weaponButtons.clear();
+        $('bw-weapons').replaceChildren();
+    }
+
     power(value, charging) {
         $('bw-power-fill').style.width = `${Math.round(value * 100)}%`;
-        $('bw-power-fill').parentElement.classList.toggle('is-charging', charging);
+        $('bw-power').classList.toggle('is-charging', charging);
     }
 
     aimInfo(text) {
@@ -218,23 +327,29 @@ export class Hud {
     }
 
     controls(canFire, canSkip, fireLabel) {
-        $('bw-btn-fire').disabled = !canFire;
-        $('bw-btn-fire').textContent = fireLabel ?? 'Feuer';
+        const fire = $('bw-btn-fire');
+        fire.disabled = !canFire;
+        fire.querySelector('span').textContent = fireLabel ?? 'Feuer';
         $('bw-btn-skip').disabled = !canSkip;
     }
 
     chat({ name, color, text, system }) {
-        const log = $('bw-chat-log');
-        const line = el('div', `bw-chat__line ${system ? 'is-system' : ''}`);
-        if (!system) {
-            const who = el('strong', '', `${name}: `);
-            who.style.color = color;
-            line.append(who);
+        for (const log of this.chatLogs) {
+            const line = el('div', `line${system ? ' sys' : ''}`);
+            if (!system) {
+                const who = el('strong', null, `${name}: `);
+                who.style.color = color;
+                line.append(who);
+            }
+            line.append(document.createTextNode(text));
+            log.append(line);
+            while (log.children.length > 80) log.firstChild.remove();
+            log.scrollTop = log.scrollHeight;
         }
-        line.append(document.createTextNode(text));
-        log.append(line);
-        while (log.children.length > 80) log.firstChild.remove();
-        log.scrollTop = log.scrollHeight;
+    }
+
+    clearChat() {
+        $('bw-chat-log').replaceChildren();
     }
 }
 

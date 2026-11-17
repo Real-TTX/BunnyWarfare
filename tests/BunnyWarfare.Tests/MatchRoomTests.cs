@@ -39,6 +39,23 @@ public sealed class MatchRoomTests
     }
 
     [Fact]
+    public void Lobby_NeverGivesTwoTeamsSimilarColours()
+    {
+        var room = NewRoom();
+        room.SeatPlayer(new Player { Id = 1, DisplayName = "Rot", TeamName = "Rot", TeamColor = "#dc2626" });
+        room.SeatPlayer(new Player { Id = 2, DisplayName = "Orange", TeamName = "Orange", TeamColor = "#c2410c" });
+        room.AddBot(1, BotLevel.Easy);
+        var colours = room.Slots.Select(s => s.Color).ToList();
+        for (var i = 0; i < colours.Count; i++)
+        {
+            for (var j = i + 1; j < colours.Count; j++)
+            {
+                Assert.True(MatchRoom.ColorDistance(colours[i], colours[j]) > 120, $"{colours[i]} vs {colours[j]}");
+            }
+        }
+    }
+
+    [Fact]
     public void Start_PlacesEveryBunnyOnLand_AndStartsATurn()
     {
         var room = NewRoom();
@@ -162,5 +179,19 @@ public sealed class MatchRoomTests
         var refused = room.Move(player, "c1", start.X + 5, start.Z, 0);
         Assert.Equal("c1", Assert.Single(refused).OnlyConnection);
         Assert.Equal(start, bunny.Position);
+    }
+
+    [Fact]
+    public void OnlyPlayersOfTheMatch_CountAsPresent()
+    {
+        var room = NewRoom();
+        room.SeatPlayer(Host);
+        room.AddBot(Host.Id, BotLevel.Easy);
+        room.StartGame(Arsenal(), DateTime.UtcNow);
+        Assert.False(room.AnyPlayerConnected);
+        room.Connections["spectator"] = 99;
+        Assert.False(room.AnyPlayerConnected);
+        room.Connections["host"] = Host.Id;
+        Assert.True(room.AnyPlayerConnected);
     }
 }

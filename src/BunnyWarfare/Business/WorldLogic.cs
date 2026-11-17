@@ -79,6 +79,22 @@ public static class WorldLogic
         return await Alive(db).AsNoTracking().FirstOrDefaultAsync(w => w.Id == id);
     }
 
+    /// <summary>
+    /// An enabled world for the 3D background of the menu and the previews: public by design (also before the sign-in), it holds nothing secret.
+    /// Without an id (or an unknown one) a random enabled world; null when there is none.
+    /// </summary>
+    public static async Task<World?> ShowcaseAsync(AppDbContext db, long? id)
+    {
+        var enabled = Alive(db).AsNoTracking().Where(w => w.IsEnabled);
+        if (id is { } wanted && await enabled.FirstOrDefaultAsync(w => w.Id == wanted) is { } world)
+        {
+            return world;
+        }
+
+        var all = await enabled.ToListAsync();
+        return all.Count == 0 ? null : all[Random.Shared.Next(all.Count)];
+    }
+
     /// <summary>The world of a match, for the game itself (the system or a player).</summary>
     internal static async Task<World?> GetForGameAsync(AppDbContext db, long id)
         => await db.Worlds.AsNoTracking().FirstOrDefaultAsync(w => w.Id == id);

@@ -10,7 +10,7 @@
 
     @if (Model.Items.Count == 0)
     {
-        <partial name="_Empty" model="@(new EmptyStateModel("swords", Model.Toolbar.Total == 0 ? "Noch keine Spiele" : "Kein Spiel gefunden", Model.Toolbar.Total == 0 ? "Sobald jemand ein Spiel eröffnet, steht es hier." : "Ändere die Suche oder die Filter.", Model.Toolbar.Total == 0, "/Play/New", "Neues Spiel", Model.Toolbar.UrlReset()))" />
+        <partial name="_Empty" model="@(new EmptyStateModel("swords", Model.Toolbar.Total == 0 ? "Noch keine Spiele" : "Kein Spiel gefunden", Model.Toolbar.Total == 0 ? "Sobald jemand ein Spiel eröffnet, steht es hier." : "Ändere die Suche oder die Filter.", Model.Toolbar.Total == 0, "/", "Zum Spiel", Model.Toolbar.UrlReset()))" />
     }
     else
     {
@@ -39,6 +39,6 @@
     <partial name="_Pager" model="Model.Pager" />
 
     <div class="mat-actions">
-        <a class="mat-btn mat-btn--primary" href="/Play/New">@Ui.Icon("plus")<span>Neues Spiel</span></a>
+        <a class="mat-btn mat-btn--primary" href="/">@Ui.Icon("gamepad")<span>Zum Spiel</span></a>
     </div>
 </div>

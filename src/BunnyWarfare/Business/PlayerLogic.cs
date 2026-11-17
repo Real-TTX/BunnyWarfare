@@ -10,6 +10,8 @@ public sealed record PlayerRow(long Id, string LoginName, string DisplayName, Pl
 
 public sealed record PlayerInput(long Id, string LoginName, string DisplayName, PlayerRole Role, bool IsActive, string TeamName, string TeamColor, string? Password);
 
+public sealed record PlayerStats(int GamesPlayed, int GamesWon, int Kills, int DamageDealt, int Rank);
+
 public sealed record ProfileInput(string DisplayName, string TeamName, string TeamColor);
 
 public sealed record LeaderboardRow(int Rank, long PlayerId, string DisplayName, string TeamName, string TeamColor, int GamesPlayed, int GamesWon, int Kills, int DamageDealt)
@@ -259,6 +261,17 @@ public static partial class PlayerLogic
         };
         var list = rows.ToList();
         return new PagedResult<LeaderboardRow>(list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList(), list.Count, await all.CountAsync());
+    }
+
+    /// <summary>The numbers of the player and their place in the leaderboard (same order as <see cref="LeaderboardAsync"/>).</summary>
+    public static async Task<PlayerStats> StatsAsync(AppDbContext db, Actor actor)
+    {
+        Guard.Player(actor);
+        var me = await Alive(db).AsNoTracking().FirstAsync(p => p.Id == actor.PlayerId);
+        var better = await Alive(db).Where(p => p.IsActive).CountAsync(p => p.GamesWon > me.GamesWon
+                                                                           || (p.GamesWon == me.GamesWon && p.Kills > me.Kills)
+                                                                           || (p.GamesWon == me.GamesWon && p.Kills == me.Kills && p.DamageDealt > me.DamageDealt));
+        return new PlayerStats(me.GamesPlayed, me.GamesWon, me.Kills, me.DamageDealt, better + 1);
     }
 
     private static async Task ValidateLoginNameAsync(AppDbContext db, string loginName, long ownId)

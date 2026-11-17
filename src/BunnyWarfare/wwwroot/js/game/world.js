@@ -1,8 +1,24 @@
-// One island with everything on it: terrain, decoration, bunnies, the marker of the turn, particles and effects.
+// One island with everything on it: ground (island and skirt), sea, plants and props, ambient life, bunnies, the marker of the turn,
+// particles and effects. Also the background of the menu (a showcase island with idle bunnies, no turn needed).
 import * as THREE from 'three';
-import { TerrainData, TerrainMesh, decodeHeights } from './terrain.js';
+import { TerrainData, TerrainMesh, SkirtMesh, createGroundMaterial, decodeHeights } from './terrain.js';
 import { Bunny, TurnMarker } from './bunny.js';
 import { Particles, Effects } from './effects.js';
+import { Water } from './world/water.js';
+import { Vegetation } from './world/vegetation.js';
+import { Life } from './world/life.js';
+import { createWindUniforms } from './world/util.js';
+
+/** The same seed in every browser: from the island itself (size, theme, a few heights), not from time or chance. */
+function seedOf(data, theme) {
+    let h = 2166136261 ^ data.size ^ (theme.length * 7919);
+    const step = Math.max(1, Math.floor(data.heights.length / 64));
+    for (let i = 0; i < data.heights.length; i += step) {
+        h ^= Math.round(data.heights[i] * 100);
+        h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+}
 
 export class World {
     constructor(stage, game) {
@@ -11,8 +27,25 @@ export class World {
         this.theme = w.theme;
         this.data = new TerrainData(w.size, decodeHeights(w.heights), w.waterLevel);
         this.group = stage.setup(w.theme, this.data.width, w.waterLevel);
-        this.terrain = new TerrainMesh(this.data, w.theme);
+        this.uniforms = createWindUniforms();
+        this.windGoal = new THREE.Vector2(0.6, 0.3);
+        const seed = seedOf(this.data, w.theme);
+
+        this.groundMaterial = createGroundMaterial(w.theme, w.waterLevel, this.data.top);
+        this.terrain = new TerrainMesh(this.data, w.theme, this.groundMaterial);
         this.group.add(this.terrain.mesh);
+        this.skirt = new SkirtMesh(this.data, w.theme, this.groundMaterial, seed ^ 0x51ed);
+        this.group.add(this.skirt.mesh);
+
+        this.water = new Water(this.data, w.theme, this.uniforms, stage.sunDirection, this.skirt.reach);
+        this.group.add(this.water.group);
+        stage.water = this.water.mesh;
+
+        this.vegetation = new Vegetation(this.data, w.theme, game.bunnies ?? [], this.uniforms, seed);
+        this.group.add(this.vegetation.group);
+        this.life = new Life(this.data, w.theme, this.uniforms, seed ^ 0x2a2a, stage.scene);
+        this.group.add(this.life.group);
+
         this.particles = new Particles();
         this.group.add(this.particles.points);
         this.effects = new Effects(this.group, this.particles, w.theme);
@@ -20,9 +53,9 @@ export class World {
         this.group.add(this.marker.mesh);
         this.teams = new Map();
         this.bunnies = new Map();
-        this.setTeams(game.teams);
-        this.setBunnies(game.bunnies);
-        this.decorations = decorate(this.group, this.data, w.theme, w.size, game.bunnies);
+        this.setTeams(game.teams ?? []);
+        this.setBunnies(game.bunnies ?? []);
+        this.time = 0;
     }
 
     get width() {
@@ -31,6 +64,11 @@ export class World {
 
     heightAt(x, z) {
         return this.data.heightAt(x, z);
+    }
+
+    /** The wind of the turn (the same vector as the server's, m/s²): grass, trees, clouds, dust and waves follow it. */
+    setWind(x, z) {
+        this.windGoal.set(x || 0, z || 0);
     }
 
     setTeams(teams) {
@@ -54,11 +92,10 @@ export class World {
     }
 
     crater(x, y, z, radius) {
-        this.terrain.crater(x, y, z, radius);
-        // decoration in the blast is gone
-        for (const d of this.decorations) {
-            if (d.visible && Math.hypot(d.position.x - x, d.position.z - z) < radius + 0.3) d.visible = false;
-        }
+        const region = this.terrain.crater(x, y, z, radius);
+        this.water.crater(region);
+        // plants and props in the blast are gone, those at the rim sink onto the new ground
+        this.vegetation.crater(x, z, radius);
         // graves and the dead follow the ground
         for (const b of this.bunnies.values()) {
             if (!b.alive && b.grave?.visible) b.snap(b.position.x, this.heightAt(b.position.x, b.position.z), b.position.z);
@@ -66,106 +103,26 @@ export class World {
     }
 
     update(dt, time) {
+        this.time = time;
+        this.uniforms.uTime.value = time;
+        this.uniforms.uWind.value.lerp(this.windGoal, 1 - Math.exp(-dt * 0.8));
         for (const b of this.bunnies.values()) b.update(dt, time);
         this.marker.update(dt);
         this.particles.update(dt);
         this.effects.update(dt);
-        if (this.stage.water) this.stage.water.position.y = this.data.waterLevel + Math.sin(time * 0.8) * 0.03;
+        this.life.update(dt, time, this.stage.camera);
+        this.stage.sky?.update(dt, time, this.uniforms.uWind.value);
     }
 
     dispose() {
         for (const b of this.bunnies.values()) b.dispose();
         this.effects.clear();
         this.terrain.dispose();
+        this.skirt.dispose();
+        this.water.dispose();
+        this.vegetation.dispose();
+        this.life.dispose();
+        this.groundMaterial.dispose();
+        this.stage.sky?.dispose();
     }
-}
-
-// ---------------------------------------------------------------- decoration (purely for the look; the server knows nothing of it)
-
-const deco = {
-    trunk: new THREE.CylinderGeometry(0.08, 0.12, 0.7, 6),
-    pine: new THREE.ConeGeometry(0.55, 1.4, 7),
-    bush: new THREE.IcosahedronGeometry(0.45, 0),
-    rock: new THREE.DodecahedronGeometry(0.35, 0),
-    cactus: new THREE.CapsuleGeometry(0.14, 0.9, 3, 8),
-    arm: new THREE.CapsuleGeometry(0.09, 0.35, 3, 6),
-};
-
-const decoMaterials = {
-    trunk: new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 }),
-    pine: new THREE.MeshStandardMaterial({ color: 0x2f6b2a, roughness: 0.9, flatShading: true }),
-    snowPine: new THREE.MeshStandardMaterial({ color: 0x4f7d5c, roughness: 0.9, flatShading: true }),
-    bush: new THREE.MeshStandardMaterial({ color: 0x4f9a35, roughness: 0.9, flatShading: true }),
-    rock: new THREE.MeshStandardMaterial({ color: 0x8a8378, roughness: 1, flatShading: true }),
-    moonRock: new THREE.MeshStandardMaterial({ color: 0x6f7078, roughness: 1, flatShading: true }),
-    sandRock: new THREE.MeshStandardMaterial({ color: 0xa0643a, roughness: 1, flatShading: true }),
-    cactus: new THREE.MeshStandardMaterial({ color: 0x4f8a3a, roughness: 0.8 }),
-    snowCap: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, flatShading: true }),
-};
-
-function mulberry32(seed) {
-    return () => {
-        seed |= 0;
-        seed = (seed + 0x6d2b79f5) | 0;
-        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-function mesh(geometry, material, x, y, z, scale = 1) {
-    const m = new THREE.Mesh(geometry, material);
-    m.position.set(x, y, z);
-    m.scale.setScalar(scale);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    return m;
-}
-
-function makeDecoration(theme, random) {
-    const g = new THREE.Group();
-    const kind = random();
-    const s = 0.7 + random() * 0.6;
-    if (theme === 'Moon' || (theme !== 'Desert' && kind < 0.25)) {
-        const rock = mesh(deco.rock, theme === 'Moon' ? decoMaterials.moonRock : decoMaterials.rock, 0, 0.15, 0, s);
-        rock.rotation.set(random() * 3, random() * 3, random() * 3);
-        g.add(rock);
-    } else if (theme === 'Desert') {
-        if (kind < 0.5) {
-            g.add(mesh(deco.cactus, decoMaterials.cactus, 0, 0.55, 0, s));
-            const arm = mesh(deco.arm, decoMaterials.cactus, 0.2 * s, 0.75 * s, 0, s);
-            arm.rotation.z = -0.4;
-            g.add(arm);
-        } else {
-            const rock = mesh(deco.rock, decoMaterials.sandRock, 0, 0.12, 0, s * 1.2);
-            rock.rotation.set(random() * 3, random() * 3, 0);
-            g.add(rock);
-        }
-    } else if (kind < 0.7) {
-        g.add(mesh(deco.trunk, decoMaterials.trunk, 0, 0.35, 0, s));
-        g.add(mesh(deco.pine, theme === 'Snow' ? decoMaterials.snowPine : decoMaterials.pine, 0, 1.2 * s, 0, s));
-        if (theme === 'Snow') g.add(mesh(deco.pine, decoMaterials.snowCap, 0, 1.55 * s, 0, s * 0.5));
-    } else {
-        g.add(mesh(deco.bush, theme === 'Snow' ? decoMaterials.snowCap : decoMaterials.bush, 0, 0.25, 0, s));
-    }
-    g.rotation.y = random() * Math.PI * 2;
-    return g;
-}
-
-function decorate(group, data, theme, size, bunnies) {
-    const random = mulberry32(size * 7919 + theme.length * 104729);
-    const count = Math.round((data.width * data.width) / 45);
-    const items = [];
-    for (let attempt = 0; attempt < count * 6 && items.length < count; attempt++) {
-        const x = 1 + random() * (data.width - 2), z = 1 + random() * (data.width - 2);
-        const y = data.heightAt(x, z);
-        if (y < data.waterLevel + 0.4 || data.slopeAt(x, z) > 0.8) continue;
-        if (bunnies.some(b => Math.hypot(b.x - x, b.z - z) < 2.5)) continue;
-        if (items.some(d => Math.hypot(d.position.x - x, d.position.z - z) < 2)) continue;
-        const d = makeDecoration(theme, random);
-        d.position.set(x, y - 0.05, z);
-        group.add(d);
-        items.push(d);
-    }
-    return items;
 }

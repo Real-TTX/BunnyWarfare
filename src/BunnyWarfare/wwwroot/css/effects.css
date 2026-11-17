@@ -1,0 +1,89 @@
+/* BunnyWarfare – what the 3D effects draw as HTML: the cartoon numbers that pop out of a bunny (Floaters in js/game/effects.js).
+   Load after game.css: the selectors are a little more specific so they win. */
+
+.bw-floaters {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 5;
+}
+
+.bw-floaters .bw-floater {
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: nowrap;
+    will-change: transform, opacity;
+    font: 400 34px/1 "Lilita One", "Trebuchet MS", "Segoe UI", sans-serif;
+    letter-spacing: 0.5px;
+    color: #ff4a3a;
+    -webkit-text-stroke: 7px #2a1608;
+    paint-order: stroke fill;
+    text-shadow: 0 4px 0 #2a1608, 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+.bw-floaters .bw-floater > span {
+    display: inline-block;
+    animation: bw-pop 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.bw-floaters .bw-floater--big {
+    font-size: 48px;
+    color: #ff2f2f;
+}
+
+.bw-floaters .bw-floater--big > span {
+    animation-name: bw-pop-big;
+}
+
+.bw-floaters .bw-floater--ko {
+    font-size: 40px;
+    color: #ffd23a;
+    background: none;
+}
+
+.bw-floaters .bw-floater--ko > span {
+    animation: bw-pop-big 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both, bw-wobble 0.9s ease-in-out 0.7s infinite;
+}
+
+.bw-floaters .bw-floater--water {
+    font-size: 38px;
+    color: #8fd8ff;
+}
+
+.bw-floaters .bw-floater--water > span {
+    animation: bw-pop-big 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both, bw-wobble 1.2s ease-in-out 0.7s infinite;
+}
+
+.bw-floaters .bw-floater--heal {
+    color: #6ee05a;
+}
+
+@keyframes bw-pop {
+    0% { transform: scale(0.2) rotate(-12deg); }
+    60% { transform: scale(1.25) rotate(4deg); }
+    100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes bw-pop-big {
+    0% { transform: scale(0.1) rotate(10deg); }
+    55% { transform: scale(1.4) rotate(-6deg); }
+    100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes bw-wobble {
+    0%, 100% { transform: rotate(-4deg) scale(1); }
+    50% { transform: rotate(4deg) scale(1.06); }
+}
+
+@media (max-width: 700px) {
+    .bw-floaters .bw-floater { font-size: 26px; -webkit-text-stroke-width: 5px; }
+    .bw-floaters .bw-floater--big,
+    .bw-floaters .bw-floater--ko,
+    .bw-floaters .bw-floater--water { font-size: 34px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bw-floaters .bw-floater > span { animation: none !important; }
+}

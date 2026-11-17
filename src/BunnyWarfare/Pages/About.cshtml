@@ -3,13 +3,13 @@
 @{
     ViewData["Title"] = "Über BunnyWarfare";
     ViewData["Width"] = "narrow";
-    if (!User.Identity!.IsAuthenticated)
+    if (!User.IsInRole(Identity.AdminRole))
     {
         Layout = "_LayoutAuth";
     }
 }
 
-@if (!User.Identity!.IsAuthenticated)
+@if (!User.IsInRole(Identity.AdminRole))
 {
     <div class="mat-auth__brand bw-auth__brand">
         <img src="~/img/logo/bunnywarfare-mark.svg" alt="" width="72" height="72" />

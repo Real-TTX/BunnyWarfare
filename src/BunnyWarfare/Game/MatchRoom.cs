@@ -31,7 +31,7 @@ public sealed class MatchRoom
     public const double RetreatSeconds = 3;
     public const double BotThinkSeconds = 2.2;
 
-    private static readonly string[] BunnyNames =
+    internal static readonly string[] BunnyNames =
     [
         "Hoppel", "Mümmel", "Puschel", "Klopfer", "Flocke", "Stampfer", "Löffel", "Möhrchen", "Krümel", "Schnuffel", "Wuschel", "Fiete", "Lotte", "Bommel", "Kasimir",
         "Rübe", "Knöpfchen", "Socke", "Zottel", "Pünktchen", "Hops", "Brummel", "Flitzer", "Nuss",
@@ -96,6 +96,12 @@ public sealed class MatchRoom
     }
 
     public bool IsConnected(long playerId) => Connections.ContainsValue(playerId);
+
+    /// <summary>Whether a player of a team (not a spectator, not a bot) is connected to the running match.</summary>
+    public bool AnyPlayerConnected => Game is { } g && g.Teams.Any(t => t.PlayerId is { } id && !t.Surrendered && IsConnected(id));
+
+    /// <summary>Since when no player of the match is connected (null while one is).</summary>
+    public DateTime? PlayersGoneSince { get; set; }
 
     // ---------------------------------------------------------------- lobby
 
@@ -192,14 +198,38 @@ public sealed class MatchRoom
         return i;
     }
 
+    /// <summary>
+    /// A colour for a new team: the wish when no team in the lobby has a similar one, else the colour of the palette that differs most from
+    /// every colour already taken (so red and orange never play against each other).
+    /// </summary>
     private string FreeColor(string? wish)
     {
-        if (wish is not null && Slots.All(s => !string.Equals(s.Color, wish, StringComparison.OrdinalIgnoreCase)))
+        var taken = Slots.Select(s => s.Color).ToList();
+        const double similar = 120;
+        if (wish is not null && taken.All(c => ColorDistance(c, wish) > similar))
         {
             return wish;
         }
 
-        return PlayerLogic.TeamColors.Select(c => c.Value).FirstOrDefault(c => Slots.All(s => !string.Equals(s.Color, c, StringComparison.OrdinalIgnoreCase))) ?? "#888888";
+        return PlayerLogic.TeamColors.Select(c => c.Value)
+            .Where(c => taken.All(t => !string.Equals(t, c, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(c => taken.Count == 0 ? 0 : taken.Min(t => ColorDistance(t, c)))
+            .FirstOrDefault() ?? "#888888";
+    }
+
+    /// <summary>The distance of two #rrggbb colours (weighted RGB, roughly as the eye sees it).</summary>
+    internal static double ColorDistance(string a, string b)
+    {
+        static (int R, int G, int B) Parse(string c) => c.Length == 7
+            ? (Convert.ToInt32(c[1..3], 16), Convert.ToInt32(c[3..5], 16), Convert.ToInt32(c[5..7], 16))
+            : (128, 128, 128);
+        var (r1, g1, b1) = Parse(a);
+        var (r2, g2, b2) = Parse(b);
+        var rMean = (r1 + r2) / 2.0;
+        var dr = r1 - r2;
+        var dg = g1 - g2;
+        var db = b1 - b2;
+        return Math.Sqrt((2 + rMean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rMean) / 256) * db * db);
     }
 
     private static string LevelName(BotLevel level) => level switch
@@ -215,7 +245,7 @@ public sealed class MatchRoom
     public List<Outgoing> StartGame(IReadOnlyList<Weapon> weapons, DateTime now)
     {
         var random = new Random(unchecked((int)(MatchId * 7919) ^ World.Seed ^ now.Millisecond));
-        var terrain = Terrain.Generate(World.GridSize, World.Seed, World.HillHeight, World.Roughness, World.WaterLevel);
+        var terrain = Terrain.Generate(World.GridSize, World.Seed, World.HillHeight, World.Roughness, World.WaterLevel, World.Theme);
         var game = new GameState
         {
             Terrain = terrain, Gravity = World.Gravity, MaxWind = World.MaxWind, Theme = World.Theme, WorldName = World.Name, TurnSeconds = TurnSeconds, Random = random,
@@ -261,7 +291,7 @@ public sealed class MatchRoom
         return outgoing;
     }
 
-    private static V3 FindSpot(GameState game, Random random)
+    internal static V3 FindSpot(GameState game, Random random)
     {
         var terrain = game.Terrain;
         var best = new V3(terrain.Width / 2, terrain.HeightAt(terrain.Width / 2, terrain.Width / 2), terrain.Width / 2);

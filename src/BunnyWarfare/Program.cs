@@ -34,7 +34,8 @@ builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(k
 builder.Services.AddAuthentication(Identity.Scheme)
     .AddCookie(Identity.Scheme, o =>
     {
-        o.LoginPath = "/Account/Login";
+        o.LoginPath = "/";
+        o.ReturnUrlParameter = "returnUrl";
         o.LogoutPath = "/Account/Logout";
         o.AccessDeniedPath = "/";
         o.Cookie.Name = "bunnywarfare.auth";
@@ -44,6 +45,29 @@ builder.Services.AddAuthentication(Identity.Scheme)
         o.SlidingExpiration = true;
         o.Events = new CookieAuthenticationEvents
         {
+            // the app and the hub answer with a status code; pages go to the sign-in of the app (which then returns to returnUrl)
+            OnRedirectToLogin = context =>
+            {
+                if (IsMachineRequest(context.Request))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return Task.CompletedTask;
+                }
+
+                context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            },
+            OnRedirectToAccessDenied = context =>
+            {
+                if (IsMachineRequest(context.Request))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                }
+
+                context.Response.Redirect("/");
+                return Task.CompletedTask;
+            },
             // a disabled or deleted account is signed out at once, and a changed role or name takes effect
             OnValidatePrincipal = async context =>
             {
@@ -72,8 +96,9 @@ builder.Services.AddAuthorizationBuilder()
 builder.Services.AddRazorPages(o =>
 {
     o.Conventions.AuthorizeFolder("/Admin", "Admin");
-    o.Conventions.AllowAnonymousToPage("/Account/Login");
-    o.Conventions.AllowAnonymousToPage("/Account/Register");
+    // the player app (the 3D menu and the game): one page for "/" and "/Play/{token}", open before the sign-in (it shows its own)
+    o.Conventions.AddPageRoute("/App", "Play/{token:guid}");
+    o.Conventions.AllowAnonymousToPage("/App");
     o.Conventions.AllowAnonymousToPage("/Error");
     o.Conventions.AllowAnonymousToPage("/About");
 }).AddMvcOptions(o =>
@@ -175,8 +200,13 @@ app.MapGet("/api/health", async (AppDbContext db) =>
 }).AllowAnonymous();
 app.MapGet("/api/version", () => Results.Ok(new { version = AppInfo.Version })).AllowAnonymous();
 
+app.MapApi();
 app.MapRazorPages();
 app.MapHub<GameHub>("/hub/game");
 
 await app.RunAsync();
 return 0;
+
+// a request of a script (the app's API, the hub) gets a status code instead of the sign-in page
+static bool IsMachineRequest(HttpRequest request)
+    => request.Path.StartsWithSegments("/api") || request.Path.StartsWithSegments("/hub");
