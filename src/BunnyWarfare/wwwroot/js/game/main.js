@@ -190,7 +190,7 @@ function wireHud() {
 
 let previous = performance.now();
 function frame(now) {
-    const dt = Math.min(0.05, (now - previous) / 1000);
+    const dt = Math.max(0, Math.min(0.05, (now - previous) / 1000)); // the first frame stamp can lie before "previous"
     previous = now;
     const playing = match.active && match.frame(dt, now, input);
     if (!playing) {

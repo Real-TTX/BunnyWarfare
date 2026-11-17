@@ -226,7 +226,7 @@ export class Match {
         this.guide?.dispose();
         state.world = new World(this.stage, game);
         this.guide = new AimGuide(state.world.group);
-        this.stage.setCenterShift(0.13);
+        this.stage.setCenterShift(0.08);
         state.weapons = game.weapons;
         state.gravity = game.world.gravity;
         state.lastTurnNumber = -1;
@@ -692,7 +692,28 @@ export class Match {
         const share = Math.min(0.38, 6.5 / horizontal);
         const focus = from.clone().lerp(new THREE.Vector3(end.x, Math.max(end.y, this.state.world.data.waterLevel), end.z), share);
         focus.y = Math.max(focus.y, from.y - 1.5);
-        return { focus, distance: Math.min(22, 6.5 + Math.min(horizontal, 26) * 0.6) };
+        return { focus, end: end.clone(), distance: Math.min(22, 6.5 + Math.min(horizontal, 26) * 0.6) };
+    }
+
+    /**
+     * Keeps the bunny and the impact in the free part of the screen (the HUD covers the top and the bottom; notebooks have little height):
+     * when one of them is outside, the aim camera backs off a little more, when both are well inside it comes back.
+     */
+    frameAim(dt) {
+        const s = this.state;
+        if (!s.aimView || this.stage.rig.manualZoom) {
+            s.aimExtra = Math.max(0, (s.aimExtra ?? 0) - dt * 6);
+            return;
+        }
+        const camera = this.stage.camera;
+        let outside = false, comfortable = true;
+        for (const point of [this.focusPoint(), s.aimView.end]) {
+            const v = point.clone().project(camera);
+            if (v.z > 1 || Math.abs(v.x) > 0.86 || v.y < -0.5 || v.y > 0.72) outside = true;
+            if (v.z > 1 || Math.abs(v.x) > 0.7 || v.y < -0.32 || v.y > 0.55) comfortable = false;
+        }
+        const extra = s.aimExtra ?? 0;
+        s.aimExtra = outside ? Math.min(26, extra + dt * 9) : comfortable ? Math.max(0, extra - dt * 2.5) : extra;
     }
 
     refreshHud(full = false) {
@@ -755,7 +776,7 @@ export class Match {
             if (input.isDown('ArrowUp', 'KeyR')) s.pitch = Math.min(PITCH_MAX, s.pitch + dt * pitchSpeed);
             if (input.isDown('ArrowDown', 'KeyF')) s.pitch = Math.max(PITCH_MIN, s.pitch - dt * pitchSpeed);
             if (s.charging) {
-                s.power = Math.min(1, (now - s.chargeStart) / 1000 / CHARGE_SECONDS);
+                s.power = Math.max(0, Math.min(1, (now - s.chargeStart) / 1000 / CHARGE_SECONDS));
                 if (s.power >= 1) this.releaseCharge();
             }
             const bunny = this.currentBunny();
@@ -784,9 +805,9 @@ export class Match {
                 this.guide?.hide();
             }
         }
-        stage.rig.autoDistance = s.aimView?.distance ?? 0;
+        stage.rig.autoDistance = s.aimView ? s.aimView.distance + (s.aimExtra ?? 0) : 0;
         stage.rig.autoPitch = s.aimView ? 0.62 : 0;
-        this.guide?.update(dt);
+        this.guide?.update(dt, stage.camera);
         // the camera keeps up tightly while the own bunny walks, elsewhere it glides
         stage.rig.followRate = this.walking ? 10 : 6;
 
@@ -801,6 +822,7 @@ export class Match {
 
         world.update(dt, now / 1000);
         stage.rig.update(dt, (x, z) => world.heightAt(x, z));
+        this.frameAim(dt);
         this.floaters.update(dt);
 
         s.hudClock += dt;

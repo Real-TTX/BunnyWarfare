@@ -878,7 +878,7 @@ export class Menu {
         k('[W]', '[A]', '[S]', '[D]', ' laufen – jeder Zug hat etwas Ausdauer');
         k('[Maus ziehen]', ' Kamera drehen = in diese Richtung zielen · ', '[rechte Maustaste]', ' ziehen = genau zielen · ', '[Mausrad]', ' zoomen');
         k('[↑]', '[↓]', ' oder ', '[R]', '[F]', ' Rohr heben und senken · ', '[Shift]', ' halten = fein zielen');
-        k('Die gepunktete Bahn zeigt, wohin der Schuss fliegt (mit Wind) – der Kreis, wo er einschlägt; rot = Treffer.');
+        k('Die gepunktete Bahn zeigt, wohin der Schuss fliegt (mit Wind) – das Fadenkreuz, wo er einschlägt; rot = Treffer, blau = Wasser.');
         k('[Leertaste]', ' halten = Kraft laden, loslassen = Feuer');
         k('[1]', '–', '[9]', ' Waffe wählen · Luftschlag: Ziel auf der Insel anklicken');
         k('[Tab]', ' Zug beenden · ', '[Enter]', ' Chat · ', '[H]', ' Hilfe');

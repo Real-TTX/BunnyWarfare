@@ -1,6 +1,6 @@
 // The aim help: where a shot will go. predictShot() flies a shot like the server (Simulation.Fly: gravity, wind, bounces, fuse,
 // bunnies in the way, water) on the height map of the browser; AimGuide draws the path as marching dots (faint where a hill hides them)
-// and a marker where it lands (sized like the blast, red when it hits a bunny).
+// and a small crosshair where it lands (constant size on the screen; red when it hits a bunny, blue in the water).
 import * as THREE from 'three';
 
 const DT = 1 / 120;              // Simulation.Dt
@@ -235,17 +235,20 @@ export class AimGuide {
         this.group.visible = false;
     }
 
+    /** A marker: a small crosshair that keeps about the same size on the screen (update() sizes it by the camera distance). */
     marker(i) {
         while (this.markers.length <= i) {
-            const material = new THREE.MeshBasicMaterial({ map: this.texture, color: 0xffffff, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
-            const mesh = new THREE.Mesh(this.markerGeometry, material);
-            mesh.renderOrder = 6;
-            // the marker shows through small bumps, a little
+            const marker = new THREE.Group();
+            const cross = new THREE.Mesh(this.markerGeometry, new THREE.MeshBasicMaterial({ map: this.texture, color: 0xffffff, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+            cross.renderOrder = 6;
+            // the crosshair shows through small bumps, a little
             const ghost = new THREE.Mesh(this.markerGeometry, new THREE.MeshBasicMaterial({ map: this.texture, color: 0xffffff, transparent: true, opacity: 0.3, depthTest: false, depthWrite: false }));
             ghost.renderOrder = 7;
-            mesh.add(ghost);
-            this.group.add(mesh);
-            this.markers.push(mesh);
+            cross.add(ghost);
+            marker.add(cross);
+            marker.userData = { cross };
+            this.group.add(marker);
+            this.markers.push(marker);
         }
         return this.markers[i];
     }
@@ -270,15 +273,15 @@ export class AimGuide {
             for (const impact of prediction.impacts) {
                 const m = this.marker(used++);
                 m.visible = true;
-                const r = Math.max(0.9, impact.radius);
-                m.scale.set(r * 2, r * 2, 1);
+                const { cross } = m.userData;
                 const n = options.data && !impact.water ? normalAt(options.data, impact.point.x, impact.point.z) : new THREE.Vector3(0, 1, 0);
                 m.position.copy(impact.point).addScaledVector(n, 0.06);
                 m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
-                m.rotateZ(this.time * (impact.hit ? 2.5 : 0.8));
+                cross.rotation.z = this.time * (impact.hit ? 2.5 : 0.8);
+
                 const tint = impact.hit ? 0xff3b1f : impact.water ? 0x8fdcff : color ?? 0xffffff;
-                m.material.color.set(tint);
-                m.children[0].material.color.set(tint);
+                cross.material.color.set(tint);
+                cross.children[0].material.color.set(tint);
                 m.userData.hit = !!impact.hit;
             }
         }
@@ -340,14 +343,18 @@ export class AimGuide {
         this.shadow.instanceMatrix.needsUpdate = true;
     }
 
-    update(dt) {
+    /** Per frame: the dots march; the crosshairs keep about 45 px on the screen whatever the zoom (camera optional). */
+    update(dt, camera) {
         if (!this.group.visible) return;
         this.time += dt;
         this.layDots();
         const pulse = 1 + Math.sin(this.time * 6) * 0.06;
         for (const m of this.markers) {
             if (!m.visible) continue;
-            m.children[0].scale.setScalar(pulse);
+            const d = camera ? camera.position.distanceTo(m.position) : 12;
+            const size = Math.min(1.6, Math.max(0.35, d * 0.042));
+            m.userData.cross.scale.set(size, size, 1);
+            m.userData.cross.children[0].scale.setScalar(pulse);
         }
     }
 
@@ -360,8 +367,8 @@ export class AimGuide {
         this.fill.geometry.dispose();
         this.shadow.geometry.dispose();
         for (const m of this.markers) {
-            m.material.dispose();
-            m.children[0].material.dispose();
+            m.userData.cross.material.dispose();
+            m.userData.cross.children[0].material.dispose();
         }
         this.markerGeometry.dispose();
         this.texture.dispose();

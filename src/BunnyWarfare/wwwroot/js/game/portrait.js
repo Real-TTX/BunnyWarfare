@@ -714,7 +714,7 @@ export class BunnyPreview {
 
     frame(now) {
         this.raf = requestAnimationFrame(this.frame);
-        const dt = Math.min(0.05, (now - this.last) / 1000);
+        const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)); // the first frame stamp can lie before the constructor
         this.last = now;
         const b = this.bunny;
         if (b) {

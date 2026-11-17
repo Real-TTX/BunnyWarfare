@@ -430,9 +430,13 @@ class EarSpring {
 
     step(dt, target, push) {
         const k = 140, damping = 10;
-        this.v += (-(this.x - target) * k - this.v * damping + push) * dt;
-        this.x += this.v * dt;
-        this.x = Math.max(-1.6, Math.min(1.2, this.x));
+        // small steps: one big step of a stiff spring at a low frame rate would swing up
+        for (let left = dt; left > 1e-6; left -= 1 / 120) {
+            const h = Math.min(left, 1 / 120);
+            this.v += (-(this.x - target) * k - this.v * damping + push) * h;
+            this.x += this.v * h;
+            this.x = Math.max(-1.6, Math.min(1.2, this.x));
+        }
         return this.x;
     }
 }
@@ -448,16 +452,19 @@ class PupilSpring {
 
     step(dt, tx, ty, push) {
         const k = 230, damping = 9;
-        this.vx += (-(this.x - tx) * k - this.vx * damping) * dt;
-        this.vy += (-(this.y - ty) * k - this.vy * damping + push) * dt;
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-        const r = Math.hypot(this.x, this.y);
-        if (r > 1) {
-            this.x /= r;
-            this.y /= r;
-            this.vx *= 0.4;
-            this.vy *= 0.4;
+        for (let left = dt; left > 1e-6; left -= 1 / 120) {
+            const h = Math.min(left, 1 / 120);
+            this.vx += (-(this.x - tx) * k - this.vx * damping) * h;
+            this.vy += (-(this.y - ty) * k - this.vy * damping + push) * h;
+            this.x += this.vx * h;
+            this.y += this.vy * h;
+            const r = Math.hypot(this.x, this.y);
+            if (r > 1) {
+                this.x /= r;
+                this.y /= r;
+                this.vx *= 0.4;
+                this.vy *= 0.4;
+            }
         }
     }
 }
@@ -888,7 +895,7 @@ export class Bunny {
     }
 
     update(dt, time) {
-        dt = Math.min(dt, 0.1);
+        dt = Math.max(0, Math.min(dt, 0.1)); // a negative step would make every smoothing explode
         this.clock += dt;
         tickFurs(performance.now() / 1000);
         const wasMoving = this.position.distanceToSquared(this.goal) > 1e-6;
