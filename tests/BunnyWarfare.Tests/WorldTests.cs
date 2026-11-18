@@ -19,14 +19,7 @@ public sealed class WorldTests
         return data;
     }
 
-    private static IEnumerable<World> AllSeeded() =>
-    [
-        new() { Name = "Möhrenwiese", Theme = WorldTheme.Meadow, GridSize = 96, HillHeight = 7, Roughness = 0.45, WaterLevel = 0, Gravity = 9.81, MaxWind = 4, Seed = 1337 },
-        new() { Name = "Frostbau", Theme = WorldTheme.Snow, GridSize = 88, HillHeight = 10, Roughness = 0.65, WaterLevel = 0.5, Gravity = 9.81, MaxWind = 6, Seed = 4242 },
-        new() { Name = "Dünenland", Theme = WorldTheme.Desert, GridSize = 112, HillHeight = 5, Roughness = 0.3, WaterLevel = -0.5, Gravity = 9.81, MaxWind = 3, Seed = 777 },
-        new() { Name = "Mondkrater", Theme = WorldTheme.Moon, GridSize = 80, HillHeight = 6, Roughness = 0.8, WaterLevel = -1.5, Gravity = 3.2, MaxWind = 0, Seed = 9001 },
-        .. SeedLogic.LaterWorlds(),
-    ];
+    private static IEnumerable<World> AllSeeded() => SeedContent.FirstWorlds().Concat(SeedContent.LaterWorlds());
 
     private static World Seeded(string name) => AllSeeded().First(w => w.Name == name);
 
@@ -89,7 +82,7 @@ public sealed class WorldTests
     [Fact]
     public void TheNewWorlds_HaveCaves_AndTheJungleATemple()
     {
-        foreach (var w in SeedLogic.LaterWorlds())
+        foreach (var w in SeedContent.LaterWorlds())
         {
             var landmarks = new List<Terrain.Landmark>();
             Generate(w, landmarks);

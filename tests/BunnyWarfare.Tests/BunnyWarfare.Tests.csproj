@@ -18,7 +18,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\BunnyWarfare\BunnyWarfare.csproj" />
+    <ProjectReference Include="..\..\src\BunnyWarfare.Core\BunnyWarfare.Core.csproj" />
+    <ProjectReference Include="..\..\src\BunnyWarfare.Module\BunnyWarfare.Module.csproj" />
+    <ProjectReference Include="..\..\src\BunnyWarfare.Local\BunnyWarfare.Local.csproj" />
   </ItemGroup>
 
 </Project>

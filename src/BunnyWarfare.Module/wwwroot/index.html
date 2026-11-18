@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de" data-app="bunnywarfare">
+<head>
+    <meta charset="utf-8" />
+    <!-- one static page: served by the plugin at /bunnywarfare/ and /bunnywarfare/Play/{token} (with the version filled in), and by the app shell from its own files -->
+    <base href="/bunnywarfare/" />
+    <meta name="matgame-game" content="bunnywarfare" />
+    <meta name="matgame-version" content="" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#c2410c" />
+    <meta name="description" content="BunnyWarfare – rundenbasierte 3D-Hasenschlacht im Browser, allein gegen Bots oder mit Freunden." />
+    <title>BunnyWarfare</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="img/apple-touch-icon.png" />
+    <link rel="preload" href="fonts/lilita-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/nunito-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="css/play.css" />
+    <link rel="stylesheet" href="css/effects.css" />
+    <script type="importmap">{ "imports": { "three": "./lib/three/three.module.js" } }</script>
+</head>
+<body>
+
+    <!-- the 3D scene fills the window; everything else lies on top of it -->
+    <div id="bw-stage" class="bw-stage is-soft" aria-label="Spielfeld"></div>
+    <div id="bw-floaters" class="bw-floaters" aria-hidden="true"></div>
+
+    <!-- the menus (built by js/game/menu.js) -->
+    <div id="layer-auth" class="layer" hidden></div>
+    <main id="menu" class="layer" hidden aria-label="Hauptmenü"></main>
+    <div id="layer-panel" class="layer dim" hidden></div>
+    <div id="layer-lobby" class="layer dim" hidden></div>
+
+    <!-- the HUD of a match -->
+    <div id="bw-hud" class="hud" hidden>
+        <header class="hud-top">
+            <div class="hud-panel turn" id="bw-turn">
+                <div class="text">
+                    <strong id="bw-turn-title">–</strong>
+                    <small id="bw-turn-sub"></small>
+                </div>
+                <div class="timer" id="bw-timer" title="Zeit des Zuges">–</div>
+            </div>
+            <div class="hud-panel wind" title="Wind">
+                <svg id="bw-wind-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L19 12 H14.5 V22 H9.5 V12 H5 Z" fill="#6ab7ff" stroke="#3b2414" stroke-width="2" stroke-linejoin="round" /></svg>
+                <div class="bar"><i id="bw-wind-fill"></i></div>
+                <small id="bw-wind-text">Wind</small>
+            </div>
+        </header>
+
+        <aside class="hud-panel hud-teams" id="bw-teams" aria-label="Teams"></aside>
+
+        <div class="hud-menu">
+            <button type="button" class="round-btn" id="bw-btn-bird" title="Vogelperspektive (V)" aria-label="Vogelperspektive"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l6-3 6 3 6-3v11l-6 3-6-3-6 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 5v11M15 8v11" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="11" r="1.6" fill="currentColor"/></svg></button>
+            <button type="button" class="round-btn" id="bw-btn-help" title="Hilfe (H)" aria-label="Hilfe"><svg class="ico" aria-hidden="true"><use href="#mat-i-help-circle"></use></svg></button>
+            <button type="button" class="round-btn" id="bw-btn-sound" title="Ton an/aus" aria-label="Ton an/aus"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+            <button type="button" class="round-btn" id="bw-btn-full" title="Vollbild" aria-label="Vollbild"><svg class="ico" aria-hidden="true"><use href="#mat-i-monitor"></use></svg></button>
+            <button type="button" class="round-btn" id="bw-btn-menu" title="Menü" aria-label="Menü"><svg class="ico" aria-hidden="true"><use href="#mat-i-menu"></use></svg></button>
+            <div class="hud-panel dropdown" id="bw-dropdown" hidden>
+                <button type="button" class="btn small" id="bw-btn-surrender"><svg class="ico" aria-hidden="true"><use href="#mat-i-x-circle"></use></svg><span>Aufgeben</span></button>
+                <button type="button" class="btn small" id="bw-btn-leave"><svg class="ico" aria-hidden="true"><use href="#mat-i-logout"></use></svg><span>Zum Menü</span></button>
+            </div>
+        </div>
+
+        <aside class="hud-panel hud-chat" aria-label="Chat">
+            <div class="chatlog" id="bw-chat-log" aria-live="polite"></div>
+            <form id="bw-chat-form" autocomplete="off">
+                <input class="field" id="bw-chat-input" maxlength="200" placeholder="Enter = Chat" aria-label="Chat-Nachricht" />
+            </form>
+        </aside>
+
+        <footer class="hud-bottom">
+            <div class="hud-panel stamina" id="bw-stamina" hidden>
+                <span>Ausdauer</span>
+                <div class="bar"><i id="bw-stamina-fill"></i></div>
+            </div>
+            <div class="hud-panel arsenal">
+                <div class="weapons" id="bw-weapons" role="toolbar" aria-label="Waffen"></div>
+                <div class="controls">
+                    <div class="aiminfo" id="bw-aiminfo">Winkel –</div>
+                    <div class="power" id="bw-power" title="Kraft (Leertaste halten)"><i id="bw-power-fill"></i></div>
+                    <button type="button" class="btn primary" id="bw-btn-fire"><svg class="ico" aria-hidden="true"><use href="#mat-i-crosshair"></use></svg><span>Feuer</span></button>
+                    <button type="button" class="btn" id="bw-btn-skip" title="Zug beenden (Tab)"><svg class="ico" aria-hidden="true"><use href="#mat-i-chevron-right"></use></svg><span>Weiter</span></button>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <div id="layer-over" class="layer dim" hidden></div>
+
+    <div class="layer dim" id="bw-help" hidden>
+        <section class="panel narrow">
+            <div class="panel-head"><h2 class="title small">Steuerung</h2></div>
+            <ul class="keys">
+                <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen (Ausdauer pro Zug)</li>
+                <li><kbd>Maus ziehen</kbd> Kamera drehen = Richtung · <kbd>rechte Maustaste</kbd> ziehen = genau zielen</li>
+                <li><kbd>Mausrad</kbd> zoomen · <kbd>Q</kbd><kbd>E</kbd> drehen</li>
+                <li><kbd>↑</kbd><kbd>↓</kbd> / <kbd>R</kbd><kbd>F</kbd> Winkel · <kbd>Shift</kbd> halten = fein</li>
+                <li><kbd>Leertaste</kbd> halten = Kraft, loslassen = Feuer</li>
+                <li><kbd>1</kbd>–<kbd>9</kbd> Waffe · Luftschlag &amp; Hasenloch: Ziel anklicken</li>
+                <li><kbd>V</kbd> Vogelperspektive über die ganze Insel (Luftschlag: automatisch)</li>
+                <li>Kisten fallen vom Himmel: hinlaufen und einsammeln – Waffen, Leben, Extras</li>
+                <li><kbd>Tab</kbd> Zug beenden · <kbd>Enter</kbd> Chat · <kbd>H</kbd> Hilfe</li>
+            </ul>
+            <div class="panel-foot"><span class="spacer"></span><button type="button" class="btn primary" id="bw-help-close">Verstanden!</button></div>
+        </section>
+    </div>
+
+    <div class="layer dim" id="bw-confirm" hidden>
+        <section class="panel narrow">
+            <div class="panel-head center"><h2 class="title small">Wirklich aufgeben?</h2></div>
+            <p class="lead" style="text-align:center">Alle deine Hasen verlassen das Schlachtfeld.</p>
+            <div class="panel-foot" style="justify-content:center">
+                <button type="button" class="btn" id="bw-confirm-no">Weiterkämpfen</button>
+                <button type="button" class="btn danger" id="bw-confirm-yes">Aufgeben</button>
+            </div>
+        </section>
+    </div>
+
+    <div class="splash" id="bw-splash">
+        <div class="splash__inner">
+            <img src="img/logo/bunnywarfare-mark.svg" alt="" width="140" height="140" />
+            <span>Hasen werden geweckt</span>
+            <span class="splash__dots"><i></i><i></i><i></i></span>
+        </div>
+    </div>
+    <div class="conn-banner" id="bw-banner" hidden></div>
+    <div class="toasts" id="bw-toasts" aria-live="assertive"></div>
+
+    <noscript><p style="position:fixed;inset:auto 0 0;padding:16px;background:#fff;text-align:center">BunnyWarfare braucht JavaScript und WebGL.</p></noscript>
+
+    <script src="lib/signalr/signalr.min.js"></script>
+    <script type="module" src="js/game/main.js"></script>
+</body>
+</html>

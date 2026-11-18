@@ -20,6 +20,8 @@ public sealed class PermissionTests
         await Assert.ThrowsAsync<AccessDeniedException>(() => MatchLogic.AdminListAsync(db, Player, Everything));
         await Assert.ThrowsAsync<AccessDeniedException>(() => MatchLogic.DashboardAsync(db, Player));
         await Assert.ThrowsAsync<AccessDeniedException>(() => SettingLogic.SaveAsync(db, Player, ServerSettings.Default));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => ImportLogic.ImportAsync(db, Player, null!, "Host=x", onlyOnce: false, CancellationToken.None));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => PlayerLogic.AccountDeletedAsync(db, Player, 6));
     }
 
     [Fact]
@@ -34,5 +36,6 @@ public sealed class PermissionTests
     {
         AppDbContext db = null!;
         await Assert.ThrowsAsync<AccessDeniedException>(() => MatchLogic.CreateAsync(db, Actor.System, new MatchInput("X", 1, 2, 1, 100, 30, true)));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => PlayerLogic.EnsureAsync(db, Actor.System, isGuest: false));
     }
 }

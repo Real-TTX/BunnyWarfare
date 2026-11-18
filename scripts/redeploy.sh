@@ -1,9 +1,11 @@
 #!/usr/bin/env sh
-# Baut den BunnyWarfare-Container neu und startet den lokalen Stack. "--clean" löscht vorher die Volumes.
+# Rebuilds and starts the local MatGame stack with BunnyWarfare in it (BunnyWarfare is a plugin of MatGame: ../MatGame).
+# Usage: ./scripts/redeploy.sh [--clean]
 set -e
-cd "$(dirname "$0")/.."
-if [ "$1" = "--clean" ]; then
-  docker compose -f docker-compose.local.yml down -v --remove-orphans
+here=$(cd "$(dirname "$0")" && pwd)
+matgame="$here/../../MatGame/scripts/redeploy.sh"
+if [ ! -f "$matgame" ]; then
+    echo "MatGame fehlt: BunnyWarfare laeuft als Plugin von MatGame. Bitte https://github.com/Real-TTX/MatGame neben dieses Repository klonen." >&2
+    exit 1
 fi
-docker compose -f docker-compose.local.yml up -d --build --remove-orphans
-echo "BunnyWarfare läuft auf http://localhost:2772 (pgAdmin: http://localhost:2773)"
+exec sh "$matgame" "$@"

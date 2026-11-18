@@ -9,6 +9,8 @@
     <Company>Matthias Schmoldt</Company>
     <Product>BunnyWarfare</Product>
     <Authors>Matthias Schmoldt</Authors>
+    <!-- the master the apps play on by default (MatGame); the app shell reads it, players can choose another one in the game -->
+    <MatGameDefaultServer>https://games.matthix.de</MatGameDefaultServer>
   </PropertyGroup>
 
   <!-- Versioning (single source of truth: Major/Minor below). CI overrides Channel / BuildNumber / BuildDate:

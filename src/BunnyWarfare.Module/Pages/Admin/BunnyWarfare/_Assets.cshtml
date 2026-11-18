@@ -1,0 +1,4 @@
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@* What every admin page of BunnyWarfare adds to the host's shell: its stylesheet and its own icons (carrot, swords ...) next to MatUi's. *@
+<link rel="stylesheet" href="~/bunnywarfare/css/admin.css" asp-append-version="true" />
+@Html.Raw(BunnyWarfare.Web.AdminAssets.Sprite(Env))

@@ -1,0 +1,68 @@
+@page "/Admin/BunnyWarfare/Worlds/Edit"
+@model BunnyWarfare.Pages.Admin.Worlds.EditModel
+@{
+    ViewData["Title"] = Model.IsNew ? "Neue Welt" : Model.Name;
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("BunnyWarfare", "/Admin/BunnyWarfare"), ("Welten", "/Admin/BunnyWarfare/Worlds"), (Model.IsNew ? "Neu" : Model.Name, null) };
+}
+<partial name="_Assets" />
+
+<form class="mat-form" method="post" novalidate id="world-form">
+    <partial name="_FormSummary" model="ViewData.ModelState" />
+
+    <div class="bw-split">
+        <div data-tabs>
+            <md-tab-group label="Bereiche der Welt">
+                <md-tab-button panel="world-general" icon="globe-map" active="true">Allgemein</md-tab-button>
+                <md-tab-button panel="world-terrain" icon="layers">Gelände</md-tab-button>
+                <md-tab-button panel="world-physics" icon="rocket">Physik</md-tab-button>
+            </md-tab-group>
+
+            <md-tab-panel id="world-general" active="true">
+                <div class="mat-card">
+                    <div class="mat-card__body mat-form">
+                        <md-field name="Name" label="Name" required value="@Model.Name" maxlength="60" />
+                        <md-field name="Description" kind="textarea" label="Beschreibung" value="@Model.Description" maxlength="400" rows="3" optional="true" />
+                        <md-field name="Theme" kind="radios" label="Thema" value="@Model.Theme.ToString()" options="Model.Themes" />
+                        <md-field name="IsEnabled" kind="switch" label="Für neue Spiele wählbar" value="@Model.IsEnabled.ToString()" />
+                    </div>
+                </div>
+            </md-tab-panel>
+
+            <md-tab-panel id="world-terrain">
+                <div class="mat-card">
+                    <div class="mat-card__body mat-form mat-grid mat-grid--2">
+                        <md-field name="GridSize" kind="number" label="Größe (Punkte pro Seite)" required value="@Model.GridSize" min="@WorldLogic.MinGridSize.ToString()" max="@WorldLogic.MaxGridSize.ToString()" step="8" hint="Je Punkt 0,5 m: 96 Punkte = 47,5 m Insel." />
+                        <md-field name="Seed" kind="number" label="Startwert (Seed)" required value="@Model.Seed" hint="Gleicher Seed, gleiche Insel." />
+                        <md-field name="HillHeight" kind="number" label="Hügelhöhe (m)" required value="@Model.HillHeight" min="1" max="20" step="0.5" />
+                        <md-field name="Roughness" kind="number" label="Rauheit (0–1)" required value="@Model.Roughness" min="0" max="1" step="0.05" />
+                        <md-field name="WaterLevel" kind="number" label="Wasserstand (m)" required value="@Model.WaterLevel" min="-2" max="4" step="0.25" />
+                    </div>
+                </div>
+            </md-tab-panel>
+
+            <md-tab-panel id="world-physics">
+                <div class="mat-card">
+                    <div class="mat-card__body mat-form mat-grid mat-grid--2">
+                        <md-field name="Gravity" kind="number" label="Schwerkraft (m/s²)" required value="@Model.Gravity" min="1" max="25" step="0.01" hint="Erde 9,81 · Mond 1,62 (im Spiel 3,2 fühlt sich besser an)." />
+                        <md-field name="MaxWind" kind="number" label="Stärkster Wind" required value="@Model.MaxWind" min="0" max="12" step="0.5" hint="0 = windstill." />
+                    </div>
+                </div>
+            </md-tab-panel>
+        </div>
+
+        <aside class="mat-card bw-preview" aria-label="Vorschau der Insel">
+            <div class="mat-card__head"><h2 class="mat-card__title">Vorschau</h2></div>
+            <div class="mat-card__body">
+                <canvas id="world-preview" width="256" height="256" data-preview-url="/Admin/BunnyWarfare/Worlds/Edit?handler=Preview"></canvas>
+                <p class="mat-hint" id="world-preview-info">Die Insel von oben – blau ist Wasser.</p>
+            </div>
+        </aside>
+    </div>
+
+    <md-buttons save="@(Model.IsNew ? "Anlegen" : "Speichern")" back="/Admin/BunnyWarfare/Worlds" delete-handler="@(Model.IsNew ? null : "Delete")" delete-label="Löschen"
+                delete-confirm="@($"Die Welt „{Model.Name}“ wirklich löschen?")" />
+</form>
+
+@section Scripts {
+    <script src="~/bunnywarfare/js/world-preview.js" asp-append-version="true"></script>
+}

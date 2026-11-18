@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!--
+    BunnyWarfare as a plugin of MatGame (../MatGame): the game API (/bunnywarfare/api), the hub (/bunnywarfare/hub), the clock of the matches,
+    the database schema "bunnywarfare", the admin pages (/Admin/BunnyWarfare/...) and the player app (wwwroot, served at /bunnywarfare/).
+  -->
+  <PropertyGroup>
+    <RootNamespace>BunnyWarfare</RootNamespace>
+    <AssemblyName>BunnyWarfare.Module</AssemblyName>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <MatGameWebUsings>true</MatGameWebUsings>
+    <StaticWebAssetBasePath>bunnywarfare</StaticWebAssetBasePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.*" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.*">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\MatGame\src\MatGame.Sdk\MatGame.Sdk.csproj" />
+    <ProjectReference Include="..\BunnyWarfare.Core\BunnyWarfare.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BunnyWarfare.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,42 @@
+@page "/Admin/BunnyWarfare/Players"
+@model BunnyWarfare.Pages.Admin.Players.IndexModel
+@{
+    ViewData["Title"] = "Spieler";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("BunnyWarfare", "/Admin/BunnyWarfare"), ("Spieler", null) };
+}
+<partial name="_Assets" />
+
+<div class="mat-list">
+    <partial name="_Toolbar" model="Model.Toolbar" />
+
+    @if (Model.Items.Count == 0)
+    {
+        <partial name="_Empty" model="@(new EmptyStateModel("users", Model.Toolbar.Total == 0 ? "Noch keine Spieler" : "Kein Spieler gefunden", Model.Toolbar.Total == 0 ? "Ein Spieler erscheint hier, sobald ein Konto oder Gast BunnyWarfare öffnet." : "Ändere die Suche oder die Filter.", Model.Toolbar.Total == 0, null, null, Model.Toolbar.UrlReset()))" />
+    }
+    else
+    {
+        <md-table caption="Spieler">
+            <thead>
+                <tr><th scope="col">Spieler</th><th scope="col" class="mat-hide-sm">Team</th><th scope="col">Art</th><th scope="col" class="mat-num">Level</th><th scope="col" class="mat-num">Spiele</th><th scope="col" class="mat-num mat-hide-sm">Siege</th><th scope="col" class="mat-hide-sm">Zuletzt gesehen</th><th scope="col"><span class="mat-sr-only">Aktionen</span></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var p in Model.Items)
+                {
+                    <tr>
+                        <td data-label="Spieler"><div class="mat-table__name"><span class="mat-avatar mat-avatar--sm" aria-hidden="true">@Ui.Initials(p.DisplayName)</span><span><a href="/Admin/BunnyWarfare/Players/Edit?id=@p.Id">@p.DisplayName</a><small class="mat-mono">#@p.Id</small></span></div></td>
+                        <td data-label="Team" class="mat-hide-sm">@Ui.Swatch(p.TeamColor) @p.TeamName</td>
+                        <td data-label="Art">@if (p.IsGuest) { <span class="mat-pill mat-pill--plain">Gast</span> } else { <span class="mat-pill mat-pill--ok">Konto</span> }</td>
+                        <td data-label="Level" class="mat-num mat-mono">@p.Level</td>
+                        <td data-label="Spiele" class="mat-num mat-mono">@p.GamesPlayed</td>
+                        <td data-label="Siege" class="mat-num mat-mono mat-hide-sm">@p.GamesWon</td>
+                        <td data-label="Zuletzt gesehen" class="mat-mono mat-hide-sm">@Ui.Stamp(p.LastSeenDate)</td>
+                        <td class="mat-table__cell-actions"><div class="mat-table__actions"><a class="mat-btn mat-btn--ghost mat-btn--icon mat-btn--sm" href="/Admin/BunnyWarfare/Players/Edit?id=@p.Id" aria-label="@p.DisplayName bearbeiten" data-tip="Bearbeiten">@Ui.Icon("edit")</a></div></td>
+                    </tr>
+                }
+            </tbody>
+        </md-table>
+    }
+
+    <partial name="_Pager" model="Model.Pager" />
+
+</div>

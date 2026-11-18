@@ -1,0 +1,85 @@
+@page "/Admin/BunnyWarfare/Matches/Edit"
+@model BunnyWarfare.Pages.Admin.Matches.EditModel
+@{
+    var m = Model.Match!;
+    ViewData["Title"] = m.Name;
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("BunnyWarfare", "/Admin/BunnyWarfare"), ("Spiele", "/Admin/BunnyWarfare/Matches"), (m.Name, null) };
+    var running = m.Status is MatchStatus.Lobby or MatchStatus.Running;
+}
+<partial name="_Assets" />
+
+<form class="mat-form" method="post" novalidate>
+    <partial name="_FormSummary" model="ViewData.ModelState" />
+
+    <div data-tabs>
+        <md-tab-group label="Bereiche des Spiels">
+            <md-tab-button panel="match-general" icon="swords" active="true">Allgemein</md-tab-button>
+            <md-tab-button panel="match-teams" icon="users">Teams (@m.Teams.Count)</md-tab-button>
+        </md-tab-group>
+
+        <md-tab-panel id="match-general" active="true">
+            <div class="mat-grid mat-grid--2 bw-gap">
+                <div class="mat-card">
+                    <div class="mat-card__head"><h2 class="mat-card__title">Einstellungen</h2></div>
+                    <div class="mat-card__body mat-form">
+                        <md-field name="Name" label="Name" required value="@Model.Name" maxlength="60" />
+                        <md-field name="IsPublic" kind="switch" label="Öffentlich gelistet" value="@Model.IsPublic.ToString()" />
+                    </div>
+                </div>
+                <div class="mat-card">
+                    <div class="mat-card__head"><h2 class="mat-card__title">Daten</h2></div>
+                    <div class="mat-card__body">
+                        <dl class="mat-kv">
+                            <dt>Status</dt><dd>@MatchLogic.StatusName(m.Status)</dd>
+                            <dt>Welt</dt><dd>@m.World?.Name (@WorldLogic.ThemeName(m.World?.Theme ?? WorldTheme.Meadow))</dd>
+                            <dt>Gastgeber</dt><dd>@m.HostPlayer?.DisplayName</dd>
+                            <dt>Regeln</dt><dd>@m.MaxTeams Teams · @m.BunniesPerTeam Hasen · @m.BunnyHealth HP · @m.TurnSeconds s</dd>
+                <dt>Kisten</dt><dd>@MatchLogic.CrateRateName(m.CrateRate)</dd>
+                            <dt>Erstellt</dt><dd class="mat-mono">@Ui.Stamp(m.CreateDate)</dd>
+                            <dt>Gestartet</dt><dd class="mat-mono">@Ui.Stamp(m.StartDate)</dd>
+                            <dt>Beendet</dt><dd class="mat-mono">@Ui.Stamp(m.EndDate)</dd>
+                            <dt>Züge</dt><dd class="mat-mono">@m.TurnCount</dd>
+                            <dt>Link</dt><dd><a class="mat-mono" href="/bunnywarfare/Play/@m.Token">/bunnywarfare/Play/@m.Token</a></dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </md-tab-panel>
+
+        <md-tab-panel id="match-teams">
+            @if (m.Teams.Count == 0)
+            {
+                <div class="mat-card"><div class="mat-card__body"><p class="mat-muted">Die Teams stehen erst fest, wenn das Spiel startet.</p></div></div>
+            }
+            else
+            {
+                <md-table caption="Teams">
+                    <thead>
+                        <tr><th scope="col" class="mat-num">Platz</th><th scope="col">Team</th><th scope="col">Spieler</th><th scope="col" class="mat-num">Treffer</th><th scope="col" class="mat-num">Schaden</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in m.Teams.OrderBy(t => t.Placement == 0 ? int.MaxValue : t.Placement).ThenBy(t => t.TeamIndex))
+                        {
+                            <tr>
+                                <td data-label="Platz" class="mat-num mat-mono">@(t.Placement == 0 ? "–" : t.Placement.ToString())</td>
+                                <td data-label="Team">@Ui.Swatch(t.TeamColor) @t.TeamName</td>
+                                <td data-label="Spieler">@(t.IsBot ? $"Bot ({t.BotLevel})" : t.Player?.DisplayName ?? "gelöscht")</td>
+                                <td data-label="Treffer" class="mat-num mat-mono">@t.Kills</td>
+                                <td data-label="Schaden" class="mat-num mat-mono">@t.DamageDealt</td>
+                            </tr>
+                        }
+                    </tbody>
+                </md-table>
+            }
+        </md-tab-panel>
+    </div>
+
+    <md-buttons save="Speichern" back="/Admin/BunnyWarfare/Matches" delete-handler="@(running ? null : "Delete")" delete-label="Löschen" delete-confirm="@($"Das Spiel „{m.Name}“ wirklich löschen?")">
+        @if (running)
+        {
+            <a class="mat-btn mat-btn--secondary md-btn-collapse" href="/bunnywarfare/Play/@m.Token" aria-label="Zuschauen" data-tip="Zuschauen">@Ui.Icon("eye")<span>Zuschauen</span></a>
+            <span class="mat-btn-row__spacer"></span>
+            <button type="submit" class="mat-btn mat-btn--danger md-btn-collapse" formnovalidate formaction="@($"/Admin/BunnyWarfare/Matches/Edit?id={m.Id}&handler=Abort")" data-confirm="Das Spiel jetzt beenden? Die Spieler sehen sofort das Ende." data-confirm-ok="Beenden" aria-label="Spiel beenden" data-tip="Spiel beenden">@Ui.Icon("stop")<span>Spiel beenden</span></button>
+        }
+    </md-buttons>
+</form>

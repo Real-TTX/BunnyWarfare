@@ -1,0 +1,27 @@
+@page "/Admin/BunnyWarfare/Import"
+@model BunnyWarfare.Pages.Admin.ImportModel
+@{
+    ViewData["Title"] = "Import";
+    ViewData["PageSub"] = "Einen alten BunnyWarfare-Server (vor MatGame) übernehmen";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("BunnyWarfare", "/Admin/BunnyWarfare"), ("Import", null) };
+    ViewData["Width"] = "narrow";
+}
+<partial name="_Assets" />
+
+<form class="mat-form" method="post" novalidate>
+    <partial name="_FormSummary" model="ViewData.ModelState" />
+
+    <div class="mat-card">
+        <div class="mat-card__body mat-form">
+            <p>
+                Übernimmt die Datenbank eines alten BunnyWarfare-Servers: Die Konten werden MatGame-Konten (die alten Passwörter gelten weiter),
+                dazu Statistik, Erfahrung, Look und Team der Spieler, eigene Welten und Waffen (gleicher Name = schon da) und die beendeten Spiele.
+                Jede Datenbank wird nur einmal übernommen.
+            </p>
+            <md-field name="ConnectionString" label="Verbindung zur alten Datenbank" required value="@Model.ConnectionString" mono="true" autocomplete="off"
+                      hint="PostgreSQL, z. B. Host=bunnywarfare-db-1;Port=5432;Database=bunnywarfare;Username=bunnywarfare;Password=… (der MatGame-Container muss sie erreichen). Beim Start geht es auch mit der Variable MATGAME_IMPORT_BUNNYWARFARE." />
+        </div>
+    </div>
+
+    <md-buttons save="Übernehmen" save-icon="download" back="/Admin/BunnyWarfare" />
+</form>

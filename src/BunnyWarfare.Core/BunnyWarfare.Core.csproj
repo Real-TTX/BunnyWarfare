@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The rules of the game without a server: the entities (plain classes), the island (Terrain), the flight of shots (Simulation), the bots, the crates,
+    the match in memory (MatchRoom), the messages (Dtos), the wardrobe (Cosmetics) and the seeded content. Used by the plugin (BunnyWarfare.Module, online)
+    and by the offline game in the app (BunnyWarfare.Local). No ASP.NET, no database.
+  -->
+  <PropertyGroup>
+    <RootNamespace>BunnyWarfare</RootNamespace>
+    <AssemblyName>BunnyWarfare.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BunnyWarfare.Module" />
+    <InternalsVisibleTo Include="BunnyWarfare.Local" />
+    <InternalsVisibleTo Include="BunnyWarfare.Tests" />
+  </ItemGroup>
+
+</Project>

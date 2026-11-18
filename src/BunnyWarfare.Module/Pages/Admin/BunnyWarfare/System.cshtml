@@ -1,0 +1,43 @@
+@page "/Admin/BunnyWarfare/System"
+@model BunnyWarfare.Pages.Admin.SystemModel
+@{
+    ViewData["Title"] = "Einstellungen";
+    ViewData["Crumbs"] = new List<(string, string?)> { ("Administration", "/Admin"), ("BunnyWarfare", "/Admin/BunnyWarfare"), ("Einstellungen", null) };
+    ViewData["Width"] = "narrow";
+}
+<partial name="_Assets" />
+
+<form class="mat-form" method="post" novalidate>
+    <partial name="_FormSummary" model="ViewData.ModelState" />
+
+    <div data-tabs>
+        <md-tab-group label="Bereiche der Einstellungen">
+            <md-tab-button panel="system-play" icon="gamepad" active="true">Spiel</md-tab-button>
+            <md-tab-button panel="system-info" icon="info">Info</md-tab-button>
+        </md-tab-group>
+
+        <md-tab-panel id="system-play" active="true">
+            <div class="mat-card">
+                <div class="mat-card__body mat-form">
+                    <md-field name="DefaultTurnSeconds" kind="number" label="Zugzeit für neue Spiele (Sekunden)" required value="@Model.DefaultTurnSeconds" min="15" max="120" step="5" />
+                    <md-field name="MaxTeamsPerMatch" kind="number" label="Höchstens Teams pro Spiel" required value="@Model.MaxTeamsPerMatch" min="2" max="8" />
+                    <md-field name="Announcement" kind="textarea" label="Ankündigung auf der Startseite" value="@Model.Announcement" maxlength="500" rows="3" optional="true" />
+                </div>
+            </div>
+        </md-tab-panel>
+
+        <md-tab-panel id="system-info">
+            <div class="mat-card">
+                <div class="mat-card__body">
+                    <dl class="mat-kv">
+                        <dt>Version</dt><dd class="mat-mono">@AppInfo.Version</dd>
+                        <dt>Gestartet</dt><dd class="mat-mono">@Ui.Stamp(AppInfo.Started)</dd>
+                        <dt>Laufzeit</dt><dd class="mat-mono">.NET @Environment.Version</dd>
+                    </dl>
+                </div>
+            </div>
+        </md-tab-panel>
+    </div>
+
+    <md-buttons save="Speichern" back="/Admin/BunnyWarfare" />
+</form>

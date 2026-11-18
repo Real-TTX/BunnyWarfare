@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The offline game of the app (MatGame.Shell): answers the calls of the player app that online go to the master (the game API and the hub) on the device,
+    with the same rules (BunnyWarfare.Core) and the same messages. No ASP.NET, no database: the profile is a JSON file in the app's data folder.
+  -->
+  <PropertyGroup>
+    <RootNamespace>BunnyWarfare.Local</RootNamespace>
+    <AssemblyName>BunnyWarfare.Local</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\MatGame\src\MatGame.Local\MatGame.Local.csproj" />
+    <ProjectReference Include="..\BunnyWarfare.Core\BunnyWarfare.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BunnyWarfare.Tests" />
+  </ItemGroup>
+
+</Project>

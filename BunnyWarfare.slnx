@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/BunnyWarfare/BunnyWarfare.csproj" />
+    <Project Path="src/BunnyWarfare.Core/BunnyWarfare.Core.csproj" />
+    <Project Path="src/BunnyWarfare.Module/BunnyWarfare.Module.csproj" />
+    <Project Path="src/BunnyWarfare.Local/BunnyWarfare.Local.csproj" />
+    <Project Path="src/BunnyWarfare.App/BunnyWarfare.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BunnyWarfare.Tests/BunnyWarfare.Tests.csproj" />

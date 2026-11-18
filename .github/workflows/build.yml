@@ -1,5 +1,9 @@
 name: build
 
+# BunnyWarfare is a plugin of MatGame (Real-TTX/MatGame): this workflow builds and tests the game (Core, Module, Local) against the MatGame SDK of the
+# same branch, checks the scripts of the player app and then tells MatGame to build its image with the new plugin (main -> latest, dev -> nightly).
+# The Docker image is MatGame's; BunnyWarfare has none of its own any more.
+
 on:
   push:
     branches: [main, dev]
@@ -9,18 +13,27 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   DOTNET_VERSION: '10.0.x'
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # the repositories side by side, as the project references expect them (../MatGame/src/MatGame.Sdk)
       - uses: actions/checkout@v4
+        with:
+          path: BunnyWarfare
+
+      - name: MatGame of the same branch (main otherwise)
+        shell: bash
+        run: |
+          branch="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
+          if git ls-remote --exit-code --heads https://github.com/Real-TTX/MatGame.git "$branch" > /dev/null; then ref="$branch"; else ref=main; fi
+          git clone --depth 1 --branch "$ref" https://github.com/Real-TTX/MatGame.git MatGame
+          echo "MatGame: $ref ($(git -C MatGame rev-parse --short HEAD))" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -44,9 +57,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Restore
+        working-directory: BunnyWarfare
         run: dotnet restore BunnyWarfare.slnx
 
       - name: Build
+        working-directory: BunnyWarfare
         run: >
           dotnet build BunnyWarfare.slnx -c Release --no-restore
           -p:Channel=${{ steps.ver.outputs.channel }}
@@ -54,76 +69,103 @@ jobs:
           -p:BuildDate=${{ steps.ver.outputs.date }}
 
       - name: Test
+        working-directory: BunnyWarfare
         run: dotnet test BunnyWarfare.slnx -c Release --no-build --verbosity normal --logger GitHubActions
 
       - name: Check the scripts of the game
+        working-directory: BunnyWarfare
         shell: bash
         run: |
-          for f in src/BunnyWarfare/wwwroot/js/game/*.js src/BunnyWarfare/wwwroot/js/game/*/*.js; do node --check --input-type=module < "$f" || exit 1; done
-          node --check src/BunnyWarfare/wwwroot/js/world-preview.js
+          for f in src/BunnyWarfare.Module/wwwroot/js/game/*.js src/BunnyWarfare.Module/wwwroot/js/game/*/*.js src/BunnyWarfare.Module/wwwroot/js/matgame/*.js; do
+            node --check --input-type=module < "$f" || exit 1
+          done
+          node --check src/BunnyWarfare.Module/wwwroot/js/world-preview.js
 
-      - name: Resolve version string
-        id: appver
+      - name: The copy of the MatGame SDK is unchanged
+        working-directory: BunnyWarfare
         shell: bash
         run: |
-          v=$(dotnet msbuild src/BunnyWarfare/BunnyWarfare.csproj -getProperty:InformationalVersion \
-                -p:Channel=${{ steps.ver.outputs.channel }} \
-                -p:BuildNumber=${{ steps.ver.outputs.build }} \
-                -p:BuildDate=${{ steps.ver.outputs.date }})
-          v=$(echo "$v" | tr -d '[:space:]')
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "Resolved version: $v"
+          cd src/BunnyWarfare.Module/wwwroot/js/matgame
+          tail -n +2 matgame.version | sha256sum --check --quiet
 
-      - name: Set up QEMU (arm64)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Lowercase image name
-        id: img
+      # MatGame builds the image with every game. The GITHUB_TOKEN may not start workflows of another repository:
+      # set the secret MATGAME_DISPATCH_TOKEN (a token with "contents: write" on Real-TTX/MatGame) to start it from here.
+      - name: Tell MatGame
+        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev')
+        env:
+          TOKEN: ${{ secrets.MATGAME_DISPATCH_TOKEN }}
         shell: bash
-        run: echo "name=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "MATGAME_DISPATCH_TOKEN is not set: MatGame picks the change up with its next scheduled build." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          curl -fsS -X POST https://api.github.com/repos/Real-TTX/MatGame/dispatches \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            -d "{\"event_type\":\"game-updated\",\"client_payload\":{\"game\":\"bunnywarfare\",\"branch\":\"${GITHUB_REF_NAME}\",\"sha\":\"${GITHUB_SHA}\"}}"
+          echo "MatGame was told to build (${GITHUB_REF_NAME})." >> "$GITHUB_STEP_SUMMARY"
 
-      # When the package belongs to another repository, the GITHUB_TOKEN of this one may not write to it: give this repository
-      # write access in the settings of the package, or set the secret GHCR_TOKEN (a personal access token with write:packages).
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+  # The Windows app (MatGame shell + the player app + the offline game BunnyWarfare.Local): one self-installing BunnyWarfare.exe and its manifest in the rolling release of the channel
+  # (release-channel from main, nightly-channel from dev); installed apps find it there and update themselves (MatGame.Shell.Updater).
+  windows:
+    name: Windows-App
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: BunnyWarfare auschecken
+        uses: actions/checkout@v4
         with:
-          registry: ghcr.io
-          username: ${{ secrets.GHCR_USER || github.actor }}
-          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          path: BunnyWarfare
 
-      # release: <version>, latest, release   |   nightly: <version>, nightly   |   other branches: <version>   |   pull requests: build only.
-      - name: Image tags
-        id: tags
-        shell: bash
+      - name: MatGame-Zweig bestimmen
+        id: branch
         run: |
-          image="${{ steps.img.outputs.name }}"
-          version="${{ steps.appver.outputs.version }}"
-          case "${{ steps.ver.outputs.channel }}" in
-            release) tags="$image:$version"$'\n'"$image:latest"$'\n'"$image:release" ;;
-            nightly) tags="$image:$version"$'\n'"$image:nightly" ;;
-            *)       tags="$image:$version" ;;
-          esac
-          {
-            echo "tags<<EOF"
-            echo "$tags"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          printf '### Image\n\n- version: `%s`\n' "$version" >> "$GITHUB_STEP_SUMMARY"
+          want="${{ github.ref_name }}"
+          if [ "$want" != "dev" ]; then want=main; fi
+          if git ls-remote --exit-code --heads https://github.com/Real-TTX/MatGame.git "$want" >/dev/null; then echo "name=$want" >> "$GITHUB_OUTPUT"; else echo "name=main" >> "$GITHUB_OUTPUT"; fi
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
+      - name: MatGame auschecken
+        uses: actions/checkout@v4
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          build-args: |
-            Channel=${{ steps.ver.outputs.channel }}
-            BuildNumber=${{ steps.ver.outputs.build }}
-            BuildDate=${{ steps.ver.outputs.date }}
-          tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          repository: Real-TTX/MatGame
+          ref: ${{ steps.branch.outputs.name }}
+          path: MatGame
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: App veröffentlichen
+        id: app
+        working-directory: BunnyWarfare
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then channel=release; else channel=nightly; fi
+          build=${{ github.run_number }}
+          date=$(date -u +%Y%m%d)
+          dotnet publish src/BunnyWarfare.App -c Release -r win-x64 -p:Channel=$channel -p:BuildNumber=$build -p:BuildDate=$date -o out
+          major=$(sed -n 's:.*<BunnyWarfareMajor>\(.*\)</BunnyWarfareMajor>.*:\1:p' Directory.Build.props)
+          minor=$(sed -n 's:.*<BunnyWarfareMinor>\(.*\)</BunnyWarfareMinor>.*:\1:p' Directory.Build.props)
+          if [ "$channel" = "release" ]; then version="$major.$minor.$build-$date"; else version="nightly-$build-$date"; fi
+          sha=$(sha256sum out/BunnyWarfare.exe | cut -d' ' -f1)
+          printf '{"version":"%s","channel":"%s","buildNumber":%s,"setup":"BunnyWarfare.exe","sha256":"%s"}\n' "$version" "$channel" "$build" "$sha" > out/bunnywarfare-update.json
+          cat out/bunnywarfare-update.json
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: In den Kanal-Release laden
+        working-directory: BunnyWarfare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.app.outputs.channel }}-channel"
+          pre=""; if [ "${{ steps.app.outputs.channel }}" = "nightly" ]; then pre="--prerelease"; fi
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "${{ github.sha }}" $pre --title "BunnyWarfare für Windows (${{ steps.app.outputs.channel }})" \
+            --notes "Die Windows-App von BunnyWarfare. BunnyWarfare.exe herunterladen und starten: sie installiert sich selbst (ohne Administrator) und hält sich aktuell."
+          gh release upload "$tag" out/BunnyWarfare.exe out/bunnywarfare-update.json --clobber
+          gh release edit "$tag" --notes "Die Windows-App von BunnyWarfare, Version ${{ steps.app.outputs.version }}. BunnyWarfare.exe herunterladen und starten: sie installiert sich selbst (ohne Administrator) und hält sich aktuell."

@@ -74,7 +74,7 @@ public sealed class ProgressionTests
     public async Task SaveLook_RefusesLockedItems_AndKeepsUnlockedOnes()
     {
         await using var db = NewDb();
-        var player = new Player { LoginName = "hoppel", DisplayName = "Hoppel", TeamName = "Team Hoppel", Xp = Cosmetics.XpAt(5) };
+        var player = new Player { Id = 41, DisplayName = "Hoppel", TeamName = "Team Hoppel", Xp = Cosmetics.XpAt(5) };
         db.Players.Add(player);
         await db.SaveChangesAsync();
         var actor = new Actor(player.Id, player.DisplayName, false);
@@ -98,7 +98,7 @@ public sealed class ProgressionTests
     public async Task Finish_GivesXpOnce_ToPlayersOnly_AndNothingForAnAbortedMatch()
     {
         await using var db = NewDb();
-        var host = new Player { LoginName = "host", DisplayName = "Host", TeamName = "Hosts" };
+        var host = new Player { Id = 42, DisplayName = "Host", TeamName = "Hosts" };
         var world = new World { Name = "Wiese", Seed = 1 };
         db.AddRange(host, world);
         await db.SaveChangesAsync();

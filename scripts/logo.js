@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Writes the logo of BunnyWarfare in its levels of detail (docs/logo and src/BunnyWarfare/wwwroot/img/logo, the favicon of wwwroot):
+// Writes the logo of BunnyWarfare in its levels of detail (docs/logo and src/BunnyWarfare.Module/wwwroot/img/logo, the favicon of wwwroot):
 //   mark      the full mark (64 x 64): a cheeky bunny head with a helmet, one ear bent, a carrot crossed behind it
 //   favicon   the small mark (32 x 32): head, ears and helmet only, thicker shapes, no carrot (it would be mush at 16 px)
 //   maskable  the mark without corners, the content inside the safe zone (Android adaptive icons)
@@ -119,14 +119,14 @@ const files = {
   'bunnywarfare-hero.svg': hero,
 };
 
-for (const dir of [path.join(root, 'docs', 'logo'), path.join(root, 'src', 'BunnyWarfare', 'wwwroot', 'img', 'logo')]) {
+for (const dir of [path.join(root, 'docs', 'logo'), path.join(root, 'src', 'BunnyWarfare.Module', 'wwwroot', 'img', 'logo')]) {
   fs.mkdirSync(dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, name), content);
   }
 }
 
-fs.writeFileSync(path.join(root, 'src', 'BunnyWarfare', 'wwwroot', 'favicon.svg'), files['bunnywarfare-favicon.svg']);
+fs.writeFileSync(path.join(root, 'src', 'BunnyWarfare.Module', 'wwwroot', 'favicon.svg'), files['bunnywarfare-favicon.svg']);
 
 // ---- the sprite of the app: line icons 24 x 24 (stroke currentColor, width 2, round caps and joins), ids mat-i-* next to the toolkit's ----
 const line = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
@@ -158,12 +158,12 @@ const symbols = {
 };
 
 // do not shadow an icon the toolkit already has
-const toolkit = fs.readFileSync(path.join(root, 'src', 'BunnyWarfare', 'wwwroot', 'matui', 'matui-icons.svg'), 'utf8');
+const toolkit = fs.readFileSync(path.join(root, 'src', 'BunnyWarfare.Module', 'wwwroot', 'img', 'matui-icons.svg'), 'utf8');
 const sprite = Object.entries(symbols)
   .filter(([name]) => !toolkit.includes(`id="mat-i-${name}"`))
   .map(([name, body]) => `  <symbol id="mat-i-${name}" viewBox="0 0 24 24" ${line}>${body}</symbol>`)
   .join('\n');
-fs.writeFileSync(path.join(root, 'src', 'BunnyWarfare', 'wwwroot', 'img', 'app-icons.svg'),
+fs.writeFileSync(path.join(root, 'src', 'BunnyWarfare.Module', 'wwwroot', 'img', 'app-icons.svg'),
   `<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">\n${sprite}\n</svg>\n`);
 
 console.log('logo and sprite written');

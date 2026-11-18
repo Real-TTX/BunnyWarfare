@@ -1,9 +1,10 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Rebuilds the BunnyWarfare container and starts the local stack (docker-compose.local.yml).
+    Rebuilds and starts the local MatGame stack with BunnyWarfare in it (BunnyWarfare is a plugin of MatGame: ../MatGame).
 .DESCRIPTION
-    The data (database, keys) stays in the volumes; -Clean removes them first (empty database: the first account becomes the administrator again).
+    Delegates to ../MatGame/scripts/redeploy.ps1, which builds the MatGame image from the sibling repositories (MatGame, BunnyWarfare, KingBee).
+    -Clean removes the volumes first (empty database).
 .EXAMPLE
     ./scripts/redeploy.ps1
 .EXAMPLE
@@ -11,22 +12,10 @@
 #>
 param([switch]$Clean)
 
-$root = Split-Path -Parent $PSScriptRoot
-Push-Location $root
-try {
-    # Windows PowerShell 5.1 turns the progress lines docker writes to stderr into errors: judge by the exit code.
-    $ErrorActionPreference = 'Continue'
-    $compose = @('compose', '-f', 'docker-compose.local.yml')
-    if ($Clean) {
-        docker @compose down -v --remove-orphans
-    }
-
-    docker @compose up -d --build --remove-orphans
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose ist fehlgeschlagen.' }
-
-    Write-Host ''
-    Write-Host 'BunnyWarfare laeuft auf http://localhost:2772 (pgAdmin: http://localhost:2773)' -ForegroundColor Green
+$matgame = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'MatGame/scripts/redeploy.ps1'
+if (-not (Test-Path $matgame)) {
+    throw "MatGame fehlt: BunnyWarfare laeuft als Plugin von MatGame. Bitte https://github.com/Real-TTX/MatGame neben dieses Repository klonen ($matgame)."
 }
-finally {
-    Pop-Location
-}
+
+& $matgame -Clean:$Clean
+exit $LASTEXITCODE
