@@ -131,7 +131,6 @@ export class Stage {
 /**
  * A third-person orbit camera. Yaw uses the game's convention: the camera looks along (sin yaw, 0, cos yaw), so the yaw of the camera is the yaw of the aim.
  * Pitch lifts the camera above the target; distance is the zoom. Everything moves smoothly towards its goal.
- * orbit(speed) lets it turn by itself (the menu): radians per second, 0 = off.
  */
 export class CameraRig {
     constructor(camera) {
@@ -144,7 +143,6 @@ export class CameraRig {
         this.target = new THREE.Vector3();
         this.shakeAmount = 0;
         this.snapNext = true;
-        this.orbitSpeed = 0;
         this.followRate = 5; // how fast the camera catches up with its goal (higher = tighter)
         this.autoDistance = 0; // a distance the game wants at least (the aim camera keeps bunny and impact in view); the zoom of the player may go further
         this.shownDistance = null;
@@ -160,11 +158,6 @@ export class CameraRig {
     focus(point, snap = false) {
         this.goal.copy(point);
         if (snap) this.snapNext = true;
-    }
-
-    /** Turns around the target by itself (radians per second); 0 stops. */
-    orbit(speed) {
-        this.orbitSpeed = speed;
     }
 
     rotate(dx, dy) {
@@ -203,7 +196,6 @@ export class CameraRig {
     }
 
     update(dt, heightAt) {
-        if (this.orbitSpeed) this.yaw += this.orbitSpeed * dt;
         if (this.snapNext) {
             this.target.copy(this.goal);
             this.snapNext = false;

@@ -241,8 +241,8 @@ export class Showcase {
         this.walk(dt);
         this.flyShots(dt);
 
-        if (typeof rig.orbit === 'function') rig.orbit(this.closeUp ? 0.12 : 0.045, dt);
-        else rig.yaw += dt * (this.closeUp ? 0.12 : 0.045);
+        // the menu turns the camera itself, frame by frame: the rig keeps no turning of its own, which would carry over into a match and pull the aim to the left
+        rig.yaw += dt * (this.closeUp ? 0.12 : 0.045);
         const focus = this.closeUp ? this.closeUp.position.clone().add(new THREE.Vector3(0, 0.8, 0)) : this.center;
         rig.focus(focus);
         world.update(dt, time);
